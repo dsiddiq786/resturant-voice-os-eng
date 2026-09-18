@@ -1,0 +1,72 @@
+[
+  {
+    "item_id": "SS_PHO_BO",
+    "venue": "Sing Sing Main St",
+    "item_name": "Pho Bo",
+    "description": "Rare steak, beef brisket, bean sprouts, cilantro, green onion, basil, rice noodles",
+    "price": 18.25,
+    "station": "Noodle Line",
+    "cook_time_minutes": 6,
+    "dietary_tags": ["Dairy-Free"]
+  },
+  {
+    "item_id": "SS_PHO_GA",
+    "venue": "Sing Sing Main St",
+    "item_name": "Pho Ga",
+    "description": "Lemongrass chicken, quail eggs, bean sprouts, cilantro, green onion, basil, rice noodles",
+    "price": 17.75,
+    "station": "Noodle Line",
+    "cook_time_minutes": 6,
+    "dietary_tags": ["Dairy-Free"]
+  },
+  {
+    "item_id": "SS_PIZZA_BRISKET",
+    "venue": "Sing Sing Main St",
+    "item_name": "Brisket & Kimchi Pizza",
+    "description": "Hoisin, mozzarella, green onion, pickled onion, spicy mayo, sesame",
+    "price": 21.25,
+    "station": "Pizza Oven",
+    "cook_time_minutes": 4,
+    "dietary_tags": []
+  },
+  {
+    "item_id": "SS_PIZZA_MARGHERITA",
+    "venue": "Sing Sing Main St",
+    "item_name": "Margherita Pizza",
+    "description": "Mozzarella, tomato sauce, pesto, fresh basil",
+    "price": 18.75,
+    "station": "Pizza Oven",
+    "cook_time_minutes": 3,
+    "dietary_tags": ["Vegetarian"]
+  },
+  {
+    "item_id": "SS_BURG_KATSU",
+    "venue": "Sing Sing Main St",
+    "item_name": "Katsu Chicken Burger",
+    "description": "Crispy fried, bulldog sauce, cabbage, kewpie, potato roll",
+    "price": 22.25,
+    "station": "Grill",
+    "cook_time_minutes": 10,
+    "dietary_tags": []
+  },
+  {
+    "item_id": "SS_SNACK_WINGS",
+    "venue": "Sing Sing Main St",
+    "item_name": "Wings",
+    "description": "Red chili sauce, sriracha parm dip",
+    "price": 17.75,
+    "station": "Fryer",
+    "cook_time_minutes": 12,
+    "dietary_tags": []
+  },
+  {
+    "item_id": "SS_SNACK_CALAMARI",
+    "venue": "Sing Sing Main St",
+    "item_name": "Calamari",
+    "description": "Salsa verde, citrus, smoked paprika",
+    "price": 18.25,
+    "station": "Fryer",
+    "cook_time_minutes": 8,
+    "dietary_tags": ["Pescatarian"]
+  }
+]

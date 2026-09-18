@@ -1,0 +1,6 @@
+{
+  "name": "Sing Sing Restaurant OS",
+  "description": "Phase 4 Delivery Aggregation Gateway & Dispatch Dashboard with Kitchen Pacing Engine and AI Voice Concierge for Sing Sing Beer & Pizza.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
