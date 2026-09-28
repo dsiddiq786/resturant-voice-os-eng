@@ -1,0 +1,6 @@
+{
+  "name": "leed pizza OS",
+  "description": "Floor Command & Autonomous Voice Concierge, Kitchen Pacing, and Seating Management for leed pizza.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

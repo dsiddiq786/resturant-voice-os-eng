@@ -1,0 +1,92 @@
+[
+  {
+    "id": "LP_TRUFFLE_MUSHROOM",
+    "item_name": "Truffle Mushroom Pizza",
+    "price": 22,
+    "station": "Pizza Oven",
+    "cook_time_minutes": 4,
+    "description": "Wild roasted mushrooms, fontina, white truffle oil, thyme",
+    "dietary_tags": [
+      "Vegetarian"
+    ],
+    "is_86": false,
+    "ai_description": "Earthy and decadent with creamy fontina and aromatic truffle",
+    "venue": "leed pizza Main St",
+    "item_id": "LP_TRUFFLE_MUSHROOM"
+  },
+  {
+    "id": "LP_PEPPERONI",
+    "item_name": "Classic Pepperoni Pizza",
+    "price": 20.5,
+    "station": "Pizza Oven",
+    "cook_time_minutes": 4,
+    "description": "Crispy cups, mozzarella, hot honey drizzle, fresh basil",
+    "dietary_tags": [
+      "Popular"
+    ],
+    "is_86": false,
+    "ai_description": "Our top seller with crispy curled pepperoni and a hint of sweetness",
+    "venue": "leed pizza Main St",
+    "item_id": "LP_PEPPERONI"
+  },
+  {
+    "id": "LP_MARGHERITA",
+    "item_name": "Margherita Pizza",
+    "price": 18.75,
+    "station": "Pizza Oven",
+    "cook_time_minutes": 3,
+    "description": "San Marzano tomato sauce, fresh mozzarella, sweet basil, EVOO",
+    "dietary_tags": [
+      "Vegetarian"
+    ],
+    "is_86": false,
+    "ai_description": "Authentic Neapolitan style with fragrant Italian basil",
+    "venue": "leed pizza Main St",
+    "item_id": "LP_MARGHERITA"
+  },
+  {
+    "id": "LP_HOT_HONEY_WINGS",
+    "item_name": "Hot Honey Garlic Wings",
+    "price": 16.5,
+    "station": "Fryer",
+    "cook_time_minutes": 10,
+    "description": "Crispy double-dredged wings tossed in hot honey garlic glaze",
+    "dietary_tags": [
+      "Gluten-Free Available"
+    ],
+    "is_86": false,
+    "ai_description": "Crispy and juicy with the perfect balance of heat and sweet",
+    "venue": "leed pizza Main St",
+    "item_id": "LP_HOT_HONEY_WINGS"
+  },
+  {
+    "id": "LP_CAESAR_SALAD",
+    "item_name": "Tuscan Caesar Salad",
+    "price": 14,
+    "station": "Salad Pantry",
+    "cook_time_minutes": 2,
+    "description": "Romaine hearts, shaved pecorino, sourdough crisps, house dressing",
+    "dietary_tags": [
+      "Vegetarian"
+    ],
+    "is_86": false,
+    "ai_description": "Crisp and refreshing starter salad",
+    "venue": "leed pizza Main St",
+    "item_id": "LP_CAESAR_SALAD"
+  },
+  {
+    "id": "LP_CRAFT_IPA",
+    "item_name": "House Hazy IPA (Pint)",
+    "price": 8.5,
+    "station": "Bar",
+    "cook_time_minutes": 1,
+    "description": "Fresh local draft with tropical citrus notes",
+    "dietary_tags": [
+      "Alcohol"
+    ],
+    "is_86": false,
+    "ai_description": "Pairs great with pepperoni or wings",
+    "venue": "leed pizza Main St",
+    "item_id": "LP_CRAFT_IPA"
+  }
+]
