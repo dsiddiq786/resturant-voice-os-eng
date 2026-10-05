@@ -53,7 +53,7 @@ jobs:
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
-    environment: production
+    environment: staging
     steps:
       - name: Deploy to server over SSH
         uses: appleboy/ssh-action@v1.2.0
