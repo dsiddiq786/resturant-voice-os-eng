@@ -1,12 +1,24 @@
 # Deployment
 
 Push to `resturant_light_os` → GitHub Actions builds a Docker image, pushes
-it to GHCR (`ghcr.io/<owner>/resturant-voice-os-eng`), then SSHes into the
-production server as the unprivileged `deploy` user and recreates the
-container with the new image. No long-lived secret ever touches the
+it to GHCR (`ghcr.io/<owner>/resturant-voice-os-eng`), syncs `docker-compose.yml`
+to the server, then SSHes in as the unprivileged `deploy` user and recreates
+the containers with the new image. No long-lived secret ever touches the
 container image itself; runtime secrets (`GEMINI_API_KEY`, etc.) are written
 to `/opt/restaurant-voice-os/.env` on the server at deploy time, straight
 from GitHub Secrets.
+
+## TLS
+
+`docker-compose.yml` also runs `nginx-proxy` + `acme-companion` in front of
+the app. They auto-detect the `app` container via its `VIRTUAL_HOST` /
+`LETSENCRYPT_HOST` env vars (currently `servio.servicesground.com`, which
+must already have a DNS A record pointing at the server) and automatically
+obtain and renew a Let's Encrypt certificate — no manual certbot steps, no
+sudo needed on the server (it's all plain `docker`, which `deploy` already
+has access to). The app is reachable on 80/443 through the proxy and
+still directly on `:3000`. To change the domain, update `VIRTUAL_HOST` /
+`LETSENCRYPT_HOST` in `docker-compose.yml` and push.
 
 This is a **shared server**, so the setup script deliberately does not touch
 the firewall or SSH config (root/password SSH login stays exactly as it is
@@ -45,13 +57,14 @@ Repo → Settings → Secrets and variables → Actions → New repository secre
 | `SSH_PORT`        | `22`                                                              |
 | `SSH_PRIVATE_KEY` | contents of `gha_deploy_key` (the **private** half — never commit it) |
 | `GEMINI_API_KEY`  | your Gemini API key                                               |
-| `APP_URL`         | `http://173.212.243.194:3000` (or your future domain)             |
+| `APP_URL`         | `https://servio.servicesground.com`                               |
 
 Nothing else needs secrets — GHCR auth uses the automatic `GITHUB_TOKEN`.
 
-Optional extra hardening: in Settings → Environments, create a `production`
-environment (already referenced by the workflow) and add required reviewers,
-so every deploy needs a manual approval click.
+These are currently set as **environment secrets** on the `staging`
+GitHub Environment (the workflow's `deploy` job targets `environment: staging`
+to match). Optional extra hardening: add required reviewers to that
+environment so every deploy needs a manual approval click.
 
 ## Rollback
 

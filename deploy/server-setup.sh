@@ -10,7 +10,8 @@
 #   1. Installs Docker Engine + Compose plugin (skipped if already present)
 #   2. Creates an unprivileged "deploy" user (member of the docker group)
 #   3. Authorizes the GitHub Actions deploy key for that user ONLY
-#   4. Creates /opt/restaurant-voice-os with a docker-compose.yml
+#   4. Creates /opt/restaurant-voice-os (docker-compose.yml is synced
+#      there by the deploy workflow itself, not by this script)
 #
 # Root SSH / password login is left exactly as it is today. GitHub Actions
 # will deploy as "deploy" via SSH key, never as root.
@@ -58,22 +59,10 @@ chown -R "${DEPLOY_USER}:${DEPLOY_USER}" "/home/${DEPLOY_USER}/.ssh"
 
 echo "==> Setting up ${APP_DIR}"
 mkdir -p "${APP_DIR}"
-cat > "${APP_DIR}/docker-compose.yml" <<'EOF'
-services:
-  app:
-    image: ${IMAGE}
-    container_name: restaurant-voice-os
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    env_file:
-      - .env
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-EOF
+# docker-compose.yml itself is synced here by the GitHub Actions deploy
+# workflow on every push (see .github/workflows/deploy.yml) -- the repo
+# is the source of truth, not this script.
+[ -f "${APP_DIR}/docker-compose.yml" ] || touch "${APP_DIR}/docker-compose.yml"
 [ -f "${APP_DIR}/.env" ] || touch "${APP_DIR}/.env"
 chown -R "${DEPLOY_USER}:${DEPLOY_USER}" "${APP_DIR}"
 chmod 600 "${APP_DIR}/.env"
