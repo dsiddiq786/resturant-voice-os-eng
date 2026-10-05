@@ -1,0 +1,14 @@
+services:
+  app:
+    image: ${IMAGE}
+    container_name: restaurant-voice-os
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
