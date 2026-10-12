@@ -1,85 +1,102 @@
 # Demo progress: Leed Pizza premium demo
 
-Branch: `feature/leed-pizza-premium-demo` (created from `resturant_light_os`). `main` was not touched.
+Branch: `feature/leed-pizza-premium-demo`. `main` was not touched.
+Run locally: `npm run build && npm start`, then open http://localhost:3000.
+Needs `GEMINI_API_KEY` in `.env` for voice.
 
-## Completed
+## Round 2: luxury redesign (current)
 
-**Reservation engine (new)**
-- `lib/reservations.mjs`: availability, duplicate prevention, create, find, modify, cancel. Persists to the existing `data/leed_pizza.db` in a new `reservations` table.
-- Availability checks the requested date and time against existing bookings. Each table holds a 90-minute seating. Bar stools are reserved for solo guests.
-- Duplicates: one confirmed booking per phone number per date.
-- Changes and cancellations need the confirmation code plus the phone number on the booking. Find accepts phone plus name.
-- Confirmation codes are random and unique. Phone numbers are masked in tool results.
+### Design system
+- `app/lux.css`: near-black surfaces, ivory type, champagne and gold accents.
+  - Fonts: Cormorant Garamond (editorial serif) and Manrope via `next/font`, self-hosted at build.
+  - Component classes sit in `@layer components`, so Tailwind utilities still win.
+  - A scoped `.lux-legacy` theme re-skins the existing floor, kitchen, delivery and owner editor screens without touching their logic.
+- `components/lux/SiteNav.tsx`: glass navigation that condenses on scroll, with animated underline links. Links: AI Concierge `/`, Operations `/operations`, Owner Portal `/owner`. Full-screen sheet on mobile.
 
-**Voice agent (`server.mjs`, `lib/voiceTools.mjs`)**
-- Gemini tools: `check_availability`, `submit_reservation_data`, `find_reservation`, `modify_reservation`, `cancel_reservation`, `request_staff_callback`, `submit_food_order`.
-- Unknown tool names get an explicit error response, so the model is never left waiting.
-- The `SMS sent` and `payment link sent` claims were removed. The agent is told it cannot send them.
-- The system prompt now covers scenarios: missing details, opening hours and policies (only what is configured), allergens, complaints, supplier calls, wrong numbers, silence, interruptions, and tool errors.
-- Opening hours are not configured anywhere in this project, so the agent says it does not have them.
-- Session cleanup: the Gemini session and the SQLite handle are closed when a call ends.
-- Security: the static-file traversal in the custom server is fixed (`/_next/static/../../.env.local` now returns 404).
+### Homepage and live call
+- `components/lux/ConciergeExperience.tsx`: editorial hero with "Talk to AI Concierge", a capabilities strip, and an in-place call stage.
+- Call stage (WhatsApp-style):
+  - Identity, connection indicator and timer.
+  - Large sphere and a live status line.
+  - Mute, end, and (on mobile) conversation controls.
+  - Agent activity timeline, live transcript, booking confirmation card.
+- `components/lux/NeuralSphere.tsx`: Canvas 2D particle sphere.
+  - 480 particles on desktop, 220 on mobile, in a 3D Fibonacci sphere, with 3 nearest-neighbour links each.
+  - Perspective projection, depth-bucketed lines, gold accent particles, cursor tilt.
+  - States: idle, connecting, listening (driven by mic level), thinking (reorganises into latitude rings), waiting (scan band and faster spin), speaking (pulses with the real output audio level), ended.
+  - Pauses when hidden or off-screen. Static under `prefers-reduced-motion`.
+- `components/concierge/useVoiceCall.ts`: every UI state comes from a real event.
+  - Speaking: agent audio sources are playing, measured by an AnalyserNode on the output.
+  - Waiting: a server `activity: started` event has no matching `completed` yet.
+  - Thinking: the microphone's speech-to-silence transition, until the reply starts.
+  - Listening: the default state.
+  - Transcript and activity come straight from server messages.
 
-**Homepage (new)**
-- `app/page.tsx` is now the AI concierge call screen. The back office moved to `/owner` (it was already there). The owner panel is no longer the homepage.
-- `components/concierge/ConciergeHome.tsx`: header (Leed Pizza, AI Concierge, Owner Portal), restaurant identity, avatar, call timer, connection status, speaking and listening states, mute and end controls, booking confirmation chip, error messages.
-- `components/concierge/useVoiceCall.ts`: connects to the existing `/api/live` WebSocket with the same PCM protocol as the back-office client. No calls are simulated.
-- `components/concierge/concierge.css`: motion, with `prefers-reduced-motion` respected.
-- Page title and metadata changed to "Leed Pizza · AI Concierge".
+### Server (`server.mjs`)
+- Gemini Live input and output transcription is enabled. Fragments are merged per turn, sent to the UI, and stored in the call record, so stored transcripts are now real.
+- Every tool call emits `activity` started and completed events with a safe result summary.
+- A tool that throws still returns an error response to the model, so the agent never goes silent waiting.
+- In-call booking memory: a booking made or found during the call can be changed or cancelled without repeating the code and phone.
+- Call summaries now update on modify and cancel.
+- Prompt changes:
+  - Acknowledge before slow tools.
+  - Grounding rule: never claim availability, a booking, a change or a cancellation without a tool result.
+  - Explicit "NOT PROVIDED" restaurant facts (hours, phone, policies). Owner config values are used if present.
+  - Never promise callback timing.
+  - The agent cannot hang up and must keep answering.
 
-**Hygiene**
-- `.gitignore` now excludes `dist/`, `data/`, `*.db*`, and `tsconfig.tsbuildinfo`. The customer database can no longer be committed by accident.
+### Operations (`/operations`)
+- `components/lux/OperationsWorkspace.tsx`: sidebar workspace with Overview, Floor & tables, Reservations, Kitchen, Delivery & takeout, and Calls.
+- The overview uses only real data:
+  - Reservations today and covers (`/api/db/reservations`).
+  - Free tables (`/api/db/seating`).
+  - Open kitchen tickets and deliveries (live contexts).
+  - Calls needing attention (callback requests or tool errors).
+- Reservations list with staff cancel (`POST /api/db/reservations`).
 
-## Tests and results
+### Owner Portal (`/owner`, also `/admin`)
+- `components/owner/OwnerControlPanel.tsx` (rewritten shell) has these sections:
+  - Overview: the greeting guests hear, voice, tone, publish state, and real counts.
+  - Agent voice and Instructions: existing editors, re-themed.
+  - Restaurant profile: new name, location, greeting and dialect editor, with publish.
+  - Menu, Floor plan, Reservations, Call history.
+  - Integrations: honest provider status.
+  - Publish.
+
+## Tests actually run
 
 | Check | Result |
 |---|---|
-| `node --test tests/reservations.test.mjs` (12 cases: time parsing, booking, invalid input, duplicates, fully booked with alternatives, bar stools, find, modify, ownership, cancel, persistence across reopened DB file, past times) | **12 pass, 0 fail** |
-| `npx tsc --noEmit` | Pass |
-| `npx eslint` on changed TS files | Pass |
-| `node --check server.mjs` | Pass |
-| `npm run build` (production) | **Pass** |
-| Production server: `/` and `/owner` | 200 |
-| Static traversal `/_next/static/../../.env.local` and `../../data/leed_pizza.db` | 404 (before the fix, the file contents were served) |
-| Legitimate static chunk | 200 |
-| WebSocket `/api/live` with no Gemini key | Returns the configured-key error message and closes |
-| Browser, desktop 1280px: homepage layout | Checked visually, renders correctly |
-| Browser, mobile 375px: header and call screen | Checked visually; header fixed (wordmark hides, nav does not wrap) |
-| Browser, Owner Portal link to `/owner` | Loads |
-| Browser, Start call | Shows "Microphone access was blocked" message (the browser pane blocks the mic) |
+| `node --test tests/reservations.test.mjs` | 12 pass |
+| `tsc --noEmit`, ESLint on all new and changed files | Pass (after fixing 3 React-hooks lint errors) |
+| `npm run build` | Pass |
+| **Live Gemini, scripted calls** (`scripts/voice-smoke-test.mjs`: macOS `say` speech streamed through `/api/live` in real time) | See below |
+| Booking: check, create, modify, duplicate, cancel | Pass on the final run. Code Z4KCWH created, moved 7 to 8 PM, a second same-day booking correctly refused as duplicate, then cancelled. All saved to SQLite. |
+| Acknowledgment before tools | Final booking run: agent spoke 1.5–2.9 s before all 5 tool calls |
+| Menu and info: price, vegetarian, gluten-free | Correct, answered only from menu data |
+| Wrong number, supplier, closing hours, manager | Pass after fixes. Hours: "I don't have the hours on hand". Callbacks recorded. |
+| **Live Gemini in the browser UI** (in-app browser; synthetic microphone injected for testing only) | Connected, Speaking, Listening, Thinking, activity timeline, transcript, booking card (KAGZP8), mute, end call, ended state. Desktop and mobile. |
+| Call disconnection | Server logged the call record on close (Alex Morgan, 77 s, real transcript) |
+| Navigation: AI Concierge, Operations, Owner Portal | Each opens its own screen. Mobile menu sheet works. |
+| Hydration and console errors on `/`, `/operations`, `/owner`, `/admin`, `/host` | No errors (fixed a #418 mismatch on `/owner`) |
+| Responsive: 375 px, ~800 px and 1440 px | Checked visually: homepage, call stage and sheet, Operations, Owner |
 
-## Not tested (and why)
+### Bugs found by live testing and fixed
+1. The agent asked for the confirmation code again for a booking made in the same call. Fixed with in-call booking memory.
+2. The agent said "we have availability" before calling the tool. Fixed with a grounding rule and a stronger tool description; verified on rerun.
+3. The agent invented closing hours ("10 PM"). Fixed with an explicit NOT PROVIDED facts block; verified on rerun.
+4. The agent went permanently silent after saying goodbye to a wrong-number caller. Fixed with a "you cannot hang up" rule; verified on rerun.
+5. Call summary still said "Confirmed" after a modify or cancel. Fixed.
 
-- **Live Gemini voice conversation: not tested.** No `GEMINI_API_KEY` is configured in this environment, and the browser pane cannot grant microphone access. Tool calls and voice behaviour are unverified against the live model.
-- **Mute/unmute, end-call audio, interruptions, silence, and the wrong-number, supplier, human-handoff, and API-failure scenarios: not tested live.** The logic is in place and the prompt covers them. The server-side booking logic is covered by unit tests.
-- **Reservation tools end to end through the model: not tested.** Only the underlying logic is tested.
+## Not tested
+- A real human microphone in a regular browser tab. The in-app browser blocks the microphone, so browser tests used synthetic caller speech. The audio path after `getUserMedia` is the same code.
+- Kitchen, delivery and floor internal actions beyond rendering. Their logic was not changed.
 
-## Integration readiness (booking platforms)
-
-No integration code for any of these four exists in the repository. Findings are from public web search on the day of the sprint. Not verified against live partner documentation.
-
-- **OpenTable**: partner-gated. Requires approval as an integration partner and a formal agreement for production. Sandbox available only after approval. **Not ready.** Needs a partner application and credentials.
-- **TouchBistro**: partner-only API. Access requires applying to the partner program and commercial terms; contact via the integrations team. **Not ready.**
-- **Lightspeed**: the Reservations for Platforms API is restricted to approved partners. Requires a Developer Portal account approved by Lightspeed and an API client. **Not ready.**
-- **POS KING**: no public API or integration documentation could be found in the search. **Unknown, needs vendor contact.**
-
-Local bookings are **not** synchronized with any external platform. The UI and agent do not claim that they are.
-
-## Remaining limitations
-
-- Restaurant name in the current data is **"Standford Pizza"** (`owner_config.json`), with a greeting that says "errica" and master instructions that say "leed pizza". The call screen shows "Standford Pizza". **Needs the owner to correct this before the client demo.** This was not changed because it is the owner's configuration data.
-- Opening hours, parking, and policies are not configured. The agent will say it does not have them.
-- Call transcripts are not shown on the call screen. The Gemini stream sends audio only, and text transcription was not added without a way to test it.
-- The call record stores only the model's audio output, not the caller's, and only the first 50 chunks.
-- Food orders are still acknowledged in memory. The KDS and `orders` table are not wired to a server-side record.
-- Floor-plan and kitchen data still come from a mix of hardcoded examples and the database.
-- Back-office screens received only the header and metadata update. The sidebar, dashboard, settings, and menu screens are not redesigned.
-- `npm ci` fails because the lockfile is out of sync with `package.json`. Dependencies were installed with `npm install --no-save`, which leaves the lockfile unchanged.
-
-## Remaining work (priority order)
-
-1. Correct the restaurant name, greeting, and master instructions in `owner_config.json` (or via the owner portal), then redeploy and check the homepage.
-2. Run one live voice call with a real key: connect, greeting, check availability, book, modify, cancel, and the end call. Record results here.
-3. Provide opening hours and policy text to the owner config so the agent can answer those questions.
-4. Back-office visual pass, if time allows.
-5. Booking provider decisions: contact each provider, starting with the platforms the client is most likely to use.
+## Known limitations
+- **Restaurant identity data:** `owner_config.json` says "Standford Pizza", and the greeting says "this is your errica". The agent and screens use this as configured. Fix it in Owner Portal > Restaurant profile > Publish.
+- The agent sometimes asks "Shall I book that?" and then books in the same breath, without waiting for an answer. The details are always read back first, but confirmation isn't strictly enforced. Server-side enforcement is in the backlog.
+- When the agent goes straight to a tool call without speaking first, the first audio arrives about 2.3–2.5 s after the caller stops. The tools themselves take about 1 ms.
+- Opening hours, phone and policies are not configured, so the agent says it doesn't have them.
+- Seeded sample calls from the original app (for example Marcus Vance) still appear in call history.
+- Test bookings made during QA: Alex Morgan (KAGZP8, tomorrow 7 PM) is still confirmed; the others were cancelled. Cancel it from Operations > Reservations if not wanted.
+- Booking platforms: only the local reservation book is connected. OpenTable, TouchBistro and Lightspeed need partner approval; POS KING has no public API documentation.

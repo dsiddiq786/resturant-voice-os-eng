@@ -1,6 +1,17 @@
 import type {Metadata} from 'next';
+import { Cormorant_Garamond, Manrope } from 'next/font/google';
 import './globals.css'; // Global styles
+import './lux.css'; // Luxury design system (loaded after globals so it wins)
 import Providers from '@/components/Providers';
+
+const serif = Cormorant_Garamond({
+  subsets: ['latin'],
+  weight: ['400', '500', '600'],
+  style: ['normal', 'italic'],
+  variable: '--font-serif-lux',
+  display: 'swap',
+});
+const sans = Manrope({ subsets: ['latin'], variable: '--font-sans-lux', display: 'swap' });
 
 export const metadata: Metadata = {
   title: 'Leed Pizza · AI Concierge',
@@ -19,7 +30,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({children}: {children: React.ReactNode}) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${serif.variable} ${sans.variable}`}>
       <head>
         <script
           dangerouslySetInnerHTML={{

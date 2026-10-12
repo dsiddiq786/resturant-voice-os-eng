@@ -1,5 +1,5 @@
-import RestaurantApp from '@/components/RestaurantApp';
+import OperationsWorkspace from '@/components/lux/OperationsWorkspace';
 
 export default function OperationsPage() {
-  return <RestaurantApp initialMode="operations" />;
+  return <OperationsWorkspace />;
 }

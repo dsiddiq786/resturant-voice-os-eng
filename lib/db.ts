@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { ensureReservationSchema } from './reservations.mjs';
 
 // Using Node.js 22 built-in SQLite DatabaseSync
 // fallback-safe and synchronous
@@ -119,6 +120,9 @@ function getDb() {
   `);
 
   // Seed default data if empty
+  // 6. Reservations (shared with the voice agent in server.mjs)
+  ensureReservationSchema(db);
+
   seedDatabaseIfEmpty(db);
 
   dbInstance = db;
@@ -572,6 +576,22 @@ export const db = {
       const placeholders = currentIds.map(() => '?').join(',');
       database.prepare(`DELETE FROM menu_matrix WHERE id NOT IN (${placeholders})`).run(...currentIds);
     }
+  },
+
+  // Reservations (created by the voice agent; staff can view and cancel)
+  getReservations(limit = 100): any[] {
+    return getDb().prepare(
+      `SELECT id, confirmation_code, customer_name, customer_phone, party_size, reservation_date, reservation_time,
+              table_id, special_requests, status, created_at, updated_at
+       FROM reservations ORDER BY reservation_date DESC, reservation_time DESC LIMIT ?`
+    ).all(limit);
+  },
+
+  cancelReservationById(id: string): boolean {
+    const result = getDb().prepare(
+      `UPDATE reservations SET status = 'CANCELLED', updated_at = ? WHERE id = ? AND status = 'CONFIRMED'`
+    ).run(new Date().toISOString(), id);
+    return Number(result.changes) > 0;
   },
 
   toggleMenuItem86(id: string, is_86: boolean): void {

@@ -16,7 +16,6 @@ Items deliberately deferred from the premium demo sprint. None of these are impl
 - Live transfer to a staff phone line (today the agent only records a callback request).
 - SMS confirmations and payment links. The agent is instructed never to claim these were sent.
 - Server-side KDS and order persistence (the `orders` table is still unused).
-- Transcript text on the call screen. The Gemini stream currently sends audio only.
 - Unifying the menu source of truth (`menu_matrix.json`, `lib/menuMatrix.ts`, and the database).
 
 ## Booking platform integrations (require partner access or credentials)
@@ -25,10 +24,15 @@ Items deliberately deferred from the premium demo sprint. None of these are impl
 - Lightspeed: K-Series reservations API is for approved partners. Requires a Developer Portal account approved by Lightspeed, and a Reservations for Platforms client.
 - POS KING: no public API information found during the sprint. Needs vendor documentation or a contact.
 
-## Back office
-- Visual redesign of the owner screens (sidebar, dashboard, settings, menus, orders). Only the header and page metadata were updated.
-- Responsive audit of the floor plan and kitchen screens.
+## Voice agent
+- Server-side confirmation gate: refuse `submit_reservation_data`, `modify_reservation` and `cancel_reservation` unless the caller has spoken since the agent's read-back. The prompt alone does not stop the model from asking and acting in one breath.
+- Evaluate Gemini Live NON_BLOCKING function calls (`behavior: NON_BLOCKING` with `scheduling: WHEN_IDLE`) once external booking APIs make tools slow. The local tools take about 1 ms, so blocking calls are fine today.
+- Owner-editable opening hours, phone and policies in Restaurant profile (the prompt already reads `opening_hours`, `phone`, `policies` and `delivery_info` if present).
+- Clean up seeded sample calls from the original app.
 
+## Back office
+- Rebuild the inner layouts of the floor, kitchen, delivery and owner editor screens natively in the new design system. They are re-themed today, not re-laid-out.
+- Responsive audit of the floor plan and kitchen screens below 960 px.
 ## Technical debt
 - Split `server.mjs` into modules (prompt compiler, WebSocket session, tool handlers).
 - Replace `ScriptProcessorNode` with an `AudioWorklet` in the voice clients.
