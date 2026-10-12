@@ -75,10 +75,7 @@ export default function DeployPanel({ onSwitchToOperations }: { onSwitchToOperat
             <div className="w-8 h-8 rounded-lg bg-[#0F766E]/10 border border-[#0F766E]/30 flex items-center justify-center text-[#0F766E]">
               <Rocket size={18} />
             </div>
-            <h2 className="text-xl font-bold text-slate-900 tracking-tight">Deploy &amp; Production Verification</h2>
-            <span className="text-[11px] font-sans uppercase bg-[#F3F8F7] text-[#0F766E] px-2.5 py-0.5 rounded border border-[#0F766E]/20 ml-2">
-              Module 4
-            </span>
+            <h2 className="text-xl font-bold text-slate-900 tracking-tight">Review &amp; publish</h2>
           </div>
           <p className="text-sm text-slate-600">
             Audit system safeguards, execute availability simulations, and hot-deploy the compiled Voice Persona and Venue Graph to the live telephone network.

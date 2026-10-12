@@ -91,10 +91,7 @@ export default function VoicePersonaConfig() {
           <div className="w-8 h-8 rounded-lg bg-[#0F766E]/10 border border-[#0F766E]/30 flex items-center justify-center text-[#0F766E]">
             <Bot size={18} />
           </div>
-          <h2 className="text-xl font-bold text-slate-900 tracking-tight">AI Voice &amp; Behavior Engine</h2>
-          <span className="text-[11px] font-sans uppercase bg-[#F3F8F7] text-[#0F766E] px-2.5 py-0.5 rounded border border-[#0F766E]/20 ml-2">
-            Persona Module 1
-          </span>
+          <h2 className="text-xl font-bold text-slate-900 tracking-tight">Voice &amp; personality</h2>
         </div>
         <p className="text-sm text-slate-600">
           Configure how your Gemini Live voice concierge introduces itself to guests, its vocal timbre, and conversation tone. System rules remain immutable.

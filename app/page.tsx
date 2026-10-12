@@ -1,9 +1,5 @@
-import RestaurantApp from '@/components/RestaurantApp';
+import Concierge from '@/components/brand/Concierge';
 
 export default function Home() {
-  return (
-    <main className="min-h-screen bg-[#F3F8F7]">
-      <RestaurantApp />
-    </main>
-  );
+  return <Concierge />;
 }

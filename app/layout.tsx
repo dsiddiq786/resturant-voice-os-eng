@@ -1,25 +1,31 @@
 import type {Metadata} from 'next';
+import { Bricolage_Grotesque, Geist, Geist_Mono } from 'next/font/google';
 import './globals.css'; // Global styles
+import './brand.css'; // Leed Pizza design system (loaded after globals so it wins)
 import Providers from '@/components/Providers';
 
+const display = Bricolage_Grotesque({ subsets: ['latin'], weight: ['500', '600', '700'], variable: '--font-display', display: 'swap' });
+const body = Geist({ subsets: ['latin'], weight: ['400', '500', '600'], variable: '--font-body', display: 'swap' });
+const mono = Geist_Mono({ subsets: ['latin'], weight: ['400', '500'], variable: '--font-code', display: 'swap' });
+
 export const metadata: Metadata = {
-  title: 'leed pizza OS - Floor Command & Autonomous Voice Concierge',
-  description: 'Floor Command & Autonomous Voice Concierge, Kitchen Pacing, and Seating Management for leed pizza.',
+  title: 'Talkie · Leed Pizza AI host',
+  description: 'Talk with Talkie, the Leed Pizza AI host, to check availability, book, change or cancel a table.',
   openGraph: {
-    title: 'leed pizza OS - Floor Command & Autonomous Voice Concierge',
-    description: 'Floor Command & Autonomous Voice Concierge, Kitchen Pacing, and Seating Management for leed pizza.',
+    title: 'Talkie · Leed Pizza AI host',
+    description: 'Talk with Talkie, the Leed Pizza AI host, to check availability, book, change or cancel a table.',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'leed pizza OS - Floor Command & Autonomous Voice Concierge',
-    description: 'Floor Command & Autonomous Voice Concierge, Kitchen Pacing, and Seating Management for leed pizza.',
+    title: 'Talkie · Leed Pizza AI host',
+    description: 'Talk with Talkie, the Leed Pizza AI host, to check availability, book, change or cancel a table.',
   },
 };
 
 export default function RootLayout({children}: {children: React.ReactNode}) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${display.variable} ${body.variable} ${mono.variable}`}>
       <head>
         <script
           dangerouslySetInnerHTML={{

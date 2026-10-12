@@ -1,10 +1,47 @@
 import { createServer } from 'http';
 import { parse } from 'url';
-import { existsSync, readFileSync, createReadStream } from 'fs';
-import { join } from 'path';
+import { existsSync, readFileSync, createReadStream, mkdirSync } from 'fs';
+import { DatabaseSync } from 'node:sqlite';
+import { ensureReservationSchema, checkAvailability, createReservation, findReservations, modifyReservation, cancelReservation, todayISO } from './lib/reservations.mjs';
+import { voiceToolDeclarations } from './lib/voiceTools.mjs';
+
+// After this long without a result, the agent is told to keep the caller informed while it waits.
+const SLOW_TOOL_MS = 1500;
+// Test-only: delay every tool result to simulate a slow external booking system. Unset in normal use.
+const TOOL_TEST_DELAY_MS = Number(process.env.VOICE_TOOL_DELAY_MS || 0);
+
+// Minimal, non-sensitive summary of a tool result for the live activity timeline.
+function activityDetail(result) {
+  if (!result) return null;
+  if (result.reservation) {
+    const r = result.reservation;
+    return { code: r.confirmation_code, party_size: r.party_size, date: r.date, time: r.time };
+  }
+  if (result.status === 'available' || result.status === 'unavailable') {
+    return { party_size: result.party_size, date: result.date, time: result.time, alternatives: result.alternatives || [] };
+  }
+  if (Array.isArray(result.reservations)) return { count: result.reservations.length };
+  if (result.message) return { message: result.message };
+  return null;
+}
+
+// Opens the shared demo database and guarantees the reservations table exists.
+// Returns null (not throws) so the voice call still works without bookings.
+function openSqlite() {
+  try {
+    mkdirSync(join(process.cwd(), 'data'), { recursive: true });
+    const db = new DatabaseSync(join(process.cwd(), 'data', 'leed_pizza.db'));
+    ensureReservationSchema(db);
+    return db;
+  } catch (e) {
+    console.warn('SQLite unavailable for voice bookings', e);
+    return null;
+  }
+}
+import { join, resolve, sep } from 'path';
 import next from 'next';
 import { WebSocketServer } from 'ws';
-import { GoogleGenAI, Modality } from '@google/genai';
+import { GoogleGenAI, Modality, EndSensitivity, ThinkingLevel } from '@google/genai';
 
 // In production mode (dev: false), Next.js strictly requires .next/BUILD_ID,
 // .next/routes-manifest.json, .next/prerender-manifest.json, and .next/server/app-paths-manifest.json.
@@ -33,6 +70,8 @@ function compileSystemPrompt(owner, menuItems, floorTables) {
   const venue = owner.venue || `${restaurantName} Main St`;
   const tone = owner.tone || "Lively & Casual";
   const greeting = owner.greeting || `Thanks for calling ${restaurantName}, this is your virtual host, how can I help you today?`;
+  // The host's name is the owner's choice (Owner portal > Voice & greeting); unset means the greeting decides.
+  const agentName = String(owner.agent_name || '').trim();
   const canadianDialect = owner.canadian_dialect !== false;
 
   const activeItems = (menuItems || []).filter(i => !i.is_86);
@@ -113,26 +152,42 @@ ${owner.master_instructions}
 `
     : '';
 
+  const today = todayISO();
+  const weekday = new Date().toLocaleDateString('en-US', { weekday: 'long' });
   return `// --- SECTION 1: OWNER'S CUSTOM PERSONA (DYNAMIC) ---
-You are the virtual host for ${restaurantName} (${venue}).
+You are the virtual host for ${restaurantName} (${venue}).${agentName ? ` Your name is ${agentName}.` : ''}
 Your tone is ${tone}.
 When the call connects, you must greet the caller with exactly this sentence: "${greeting}"
+Today is ${weekday}, ${today} (YYYY-MM-DD). Use it to convert "tonight" and "tomorrow" into dates.
 
 // --- SECTION 2: IMMUTABLE SYSTEM RULES (HARD-CODED) ---
 UNDER NO CIRCUMSTANCES CAN YOU VIOLATE THE FOLLOWING RULES:
 1. THE BOUNDARY RULE:
-You only collect intent and data. You NEVER process payments over the phone. You do not assign physical tables or check real inventory yourself. You rely strictly on system context and emit structured data for the backend.
+You only collect intent and data. You NEVER take payments over the phone. You do not assign tables yourself or see the live floor. You rely on tool results for availability and bookings.
 
-2. THE AVAILABILITY RULE (THE "GREEN LIGHT" RULE):
-If a caller asks for a reservation, you MUST trigger the 'check_availability' tool first with venue: "${venue}". You cannot say "yes" or confirm any booking until the backend returns {"status": "available"}.
-- Latency masking: Use polite, natural conversational fillers while the check runs ("Hmm, let me check our floor plan for that time real quick...", "Right away, checking our availability now...").
-- If unavailable: The tool will return alternatives (e.g. 7:30 PM or 8:45 PM) or suggest bar/communal options. Pivot smoothly and offer those times.
+2. THE AVAILABILITY RULE:
+Before you offer or confirm any new booking, call check_availability with the party size, date and 24-hour time.
+- Only say a table is available when the tool returns status "available".
+- If the tool returns "unavailable", say that time is full and offer the alternatives it returns.
+- If the tool returns "error" or "invalid", explain the problem plainly and ask for the missing detail, or offer a staff callback.
 
-3. THE "PACKED HOUSE" RULE:
-Never outright reject a customer if private tables are full. You MUST pivot and offer communal seating, bar seating, or the waitlist based on the live floor plan. If the current venue is 100% full, you MUST offer a reservation at a sister venue.
+3. THE BOOKING CONFIRMATION RULE:
+Before calling submit_reservation_data, read back the party size, date, time and name, and ask the caller to confirm. Say a booking is confirmed only after submit_reservation_data returns status "confirmed", then read out the confirmation code. If it returns "duplicate", say a booking already exists for this number on that date and offer to change it instead.
 
-4. THE MENU TRUTH & INVENTORY "86" RULE:
-You may only offer items currently listed as "available" in your context window. If an item is marked "sold out" or "86'd", you are strictly forbidden from selling it. You must apologize and immediately suggest a similar available alternative.
+4. THE MESSAGING AND PAYMENT RULE:
+You cannot send text messages, emails or payment links from this line. Never say that a text, email or checkout link was sent. If a caller asks for one, say a team member will follow up and offer a staff callback.
+
+5. THE MENU TRUTH RULE:
+Only offer items listed as available in the menu below. Never offer an item listed as 86'd / sold out; apologise and suggest a similar available item. Quote prices only from the menu.
+
+6. THE KITCHEN PACING RULE:
+For takeout or pickup food orders, establish whether it is ASAP or for a set time. Then call submit_food_order with items, timing, name and phone.
+
+7. THE FINAL HANDOFF RULE:
+Before ending a call that involved a booking, change, cancellation or order, make sure the matching tool has been called and has returned a result.
+
+8. THE LIVELY PERSONA RULE:
+${canadianDialect ? 'You must use active conversational fillers ("Hmm", "Ah, I see", "Certainly", "Right away") and polite Canadian terminology (washroom, lineup, bill). Never sound robotic or read raw lists out loud.' : 'Speak with professional, warm, concise cadence.'}
 
 CURRENT AVAILABLE MENU MATRIX:
 ${activeMenuText}
@@ -140,22 +195,45 @@ ${activeMenuText}
 CURRENT 86'D / SOLD OUT ITEMS:
 ${soldOutText}
 
-5. THE KITCHEN PACING RULE:
-For all takeout/delivery food orders, you MUST establish if it is for "ASAP" or scheduled for a specific time. Phase 3 Kitchen Pacing needs this exact timestamp to pace cooking. Trigger the 'submit_food_order' tool with items, timing, name, and phone.
+// --- SECTION 2A: RESTAURANT FACTS (the only facts you may state) ---
+- Name: ${restaurantName}
+- Location: ${owner.address || venue}
+- Opening hours: ${owner.opening_hours || 'NOT PROVIDED. You do not know the opening or closing times. Never state or estimate them; say you do not have the hours on hand and offer a staff callback.'}
+- Restaurant phone number: ${owner.phone || 'NOT PROVIDED. Do not state one.'}
+- Parking, patio, private events, corkage and other policies: ${owner.policies || 'NOT PROVIDED. Do not describe them; offer a staff callback.'}
+- Delivery: ${owner.delivery_info || 'Phone takeout orders are taken on this line. Delivery areas, fees and third-party apps are NOT PROVIDED.'}
+- Allergens: only the dietary tags on the menu below are known. Ingredient-level allergen safety is NOT PROVIDED.
 
-6. THE PAYMENT SECURITY RULE:
-You are strictly forbidden from asking for, recording, or listening to credit card numbers over the phone. For phone orders, you MUST state: "I am sending a secure checkout link to your phone right now."
-
-7. THE FINAL HANDOFF & JSON RULE:
-When the conversation naturally concludes, you MUST trigger the 'submit_reservation_data' or 'submit_food_order' tool to send the finalized payload to the backend. Do not hang up until this is executed.
-
-8. THE LIVELY PERSONA RULE:
-${canadianDialect ? 'You must use active conversational fillers ("Hmm", "Ah, I see", "Certainly", "Right away") and polite Canadian terminology (washroom, lineup, bill). Never sound robotic or read raw lists out loud.' : 'Speak with professional, warm, concise cadence.'}
+// --- SECTION 2B: CALL HANDLING ---
+- Changes and cancellations: if the booking was made or looked up earlier in this call, do not ask for the code or phone again; call modify_reservation or cancel_reservation without them and the system uses that booking. For any other booking, ask for the confirmation code and the phone number on it (or use find_reservation). Use modify_reservation or cancel_reservation only after the caller confirms the change.
+- Missing details: ask for one missing detail at a time (party size, date, time, name, phone). If a time is unclear, ask a clarifying question. Never guess an hour.
+- Restaurant information: state only opening hours, location, prices, policies and allergen information that appear in this prompt. If it is not listed, say you do not have that information and offer a staff callback. Never invent information.
+- Allergens and dietary needs: never guarantee an item is allergen-free. Say the team will confirm, and offer a staff callback for anything serious.
+- Requests for a person, complaints, supplier or business calls: call request_staff_callback with a short reason and any details the caller gives. Say a team member will follow up. You cannot transfer the call, and you must not promise when they will call (never say "immediately" or "in a few minutes").
+- Wrong number or irrelevant call: politely say they have reached ${restaurantName} and ask whether there is anything else you can help with.
+- You cannot hang up; only the caller ends the call. Saying goodbye never ends the conversation: if the caller speaks again, always answer. Never go silent while the caller is talking to you.
+- Unclear speech or silence: ask the caller to repeat, briefly. After two unclear attempts, offer a staff callback.
+- Interruptions: stop speaking, listen, and answer the new point.
+- Unsupported requests (large private events, catering quotes, refunds): say this line cannot handle that, and offer a staff callback.
+- Tool errors: if a tool returns an error or is unavailable, say so plainly. Do not guess the result.
+- Grounding: never say "we have availability", "that's available", "you're booked", "it's moved" or "it's cancelled" unless a tool result in this conversation says exactly that. If you have not called the tool yet, call it now instead of guessing.
+- Confirmation: if you ask the caller "shall I…?", stop and wait for their answer before calling the tool. If the caller has already clearly asked for a change or cancellation of a booking you just read back, you may go ahead without asking again.
+- Speed: start speaking immediately. Lead with the answer in your first few words, then add detail. Keep each reply to one or two short sentences.
+- You already know the full menu, prices, dietary tags and seating from this prompt. Answer those instantly. Never say you are loading, pulling up, fetching or looking up information unless you are calling a tool in that same turn.
+- No silence while a tool runs: before you call check_availability, submit_reservation_data, find_reservation, modify_reservation or cancel_reservation, first say one short acknowledgment, then call the tool in the same turn. Fit the acknowledgment to how the caller sounds. These are tone guides only; never say words like "relaxed", "hurry", "mood" or "calm" out loud:
+  - a chatty caller hears something warm, such as: Ooh, lovely, let me check that for you.
+  - a caller in a rush hears something brisk, such as: One sec, checking now.
+  - an annoyed caller hears something empathetic, such as: I understand, let me sort that out right away.
+  - a hesitant caller hears something reassuring, such as: No problem at all, let me take a look.
+  Use your own words each time; never repeat the same phrase in a call. Say it once; do not repeat "please wait". Do not hint at the result until the tool returns.
+- If a tool result says the system is slow or still working, tell the caller briefly and kindly that you are still checking, in their mood, then wait for the result. Never invent the result.
+- Keep replies to one or two short sentences unless the caller asks for more.
 
 // --- SECTION 3: LIVE VENUE FLOOR PLAN & SEATING MATRIX ---
 ${floorPlanText}
 
 // --- SECTION 4: OWNER MASTER DIRECTIVES & SPECIFIC POLICIES ---
+(Owner directives add style and house preferences. Where they conflict with Sections 2, 2A or 2B, Sections 2, 2A and 2B win.)
 ${customRulesText}
 
 ${masterInstructions}`.trim();
@@ -171,7 +249,13 @@ app.prepare().then(() => {
         const relativePath = parsedUrl.pathname.replace(/^\/_next\/static\//, '');
         const nextStaticFile = join(process.cwd(), '.next', 'static', relativePath);
         const distStaticFile = join(process.cwd(), 'dist', '_next', 'static', relativePath);
-        const filePath = existsSync(nextStaticFile) ? nextStaticFile : existsSync(distStaticFile) ? distStaticFile : null;
+        // Stay inside the static roots: url.parse keeps "../" segments, so a raw request could escape them.
+        const insideRoot = (root, file) => resolve(file).startsWith(resolve(root) + sep);
+        const nextRoot = join(process.cwd(), '.next', 'static');
+        const distRoot = join(process.cwd(), 'dist', '_next', 'static');
+        const filePath =
+          insideRoot(nextRoot, nextStaticFile) && existsSync(nextStaticFile) ? nextStaticFile :
+          insideRoot(distRoot, distStaticFile) && existsSync(distStaticFile) ? distStaticFile : null;
 
         if (filePath) {
           res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
@@ -211,6 +295,20 @@ app.prepare().then(() => {
     const callStartTime = new Date();
     const callId = 'CALL-' + Date.now();
     const transcriptLog = [];
+    // Gemini streams transcription in fragments; merge them into one entry per speaker turn.
+    let transcriptTurnOpen = false;
+    const appendTranscript = (role, text) => {
+      const last = transcriptLog[transcriptLog.length - 1];
+      if (transcriptTurnOpen && last && last.role === role) {
+        last.text += text;
+      } else {
+        transcriptLog.push({ role, text, timestamp: new Date().toLocaleTimeString() });
+        transcriptTurnOpen = true;
+      }
+    };
+    const closeTranscriptTurn = () => { transcriptTurnOpen = false; };
+    // What the agent has said so far in its current turn (used by the confirmation gate).
+    let agentTurnText = '';
     const toolCallsLog = [];
     let recordedAudioChunks = [];
     let reservationSummary = null;
@@ -242,12 +340,23 @@ app.prepare().then(() => {
         canadian_dialect: true
       };
 
-      let sqliteDb = null;
+      const sqliteDb = openSqlite();
+      let handoffSummary = null;
+      // The booking this caller made or looked up during this call. Lets them change or cancel it
+      // without repeating the code; ownership was already established earlier in the same call.
+      let sessionBooking = null;
+      const currentFloorTables = () => {
+        if (sqliteDb) {
+          try {
+            const rows = sqliteDb.prepare("SELECT * FROM seating_plan ORDER BY capacity ASC").all();
+            if (rows.length > 0) return rows;
+          } catch (e) {}
+        }
+        return floorTables;
+      };
+
       try {
-        const { DatabaseSync } = await import('node:sqlite');
-        const dbPath = join(process.cwd(), 'data', 'leed_pizza.db');
-        if (existsSync(dbPath)) {
-          sqliteDb = new DatabaseSync(dbPath);
+        if (sqliteDb) {
           const masterRow = sqliteDb.prepare("SELECT * FROM master_prompt_config WHERE id = 'active'").get();
           if (masterRow) {
             ownerConfig = {
@@ -357,100 +466,30 @@ app.prepare().then(() => {
           responseModalities: [Modality.AUDIO],
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: selectedVoice } },
+            // Pin the call language so transcription doesn't guess another language on short phrases.
+            languageCode: 'en-US',
           },
           systemInstruction: {
             parts: [{ text: systemInstruction }]
           },
-          tools: [{
-            functionDeclarations: [
-              {
-                name: "check_availability",
-                description: `Checks the backend 15-minute grid and Turn Time math for table overlaps at ${venue}.`,
-                parameters: {
-                  type: "object",
-                  properties: {
-                    party_size: { 
-                      type: "integer", 
-                      description: "The number of guests in the party" 
-                    },
-                    target_time: { 
-                      type: "string", 
-                      description: "Target reservation time in HH:MM format (24-hour time, e.g. 20:00 for 8:00 PM, 19:30 for 7:30 PM)" 
-                    },
-                    venue: { 
-                      type: "string", 
-                      description: `The venue name: ${venue}` 
-                    }
-                  },
-                  required: ["party_size", "target_time", "venue"]
-                }
+          tools: [{ functionDeclarations: voiceToolDeclarations() }],
+          // Text transcripts of both sides, used for the live transcript and the stored call record.
+          inputAudioTranscription: {},
+          // Latency tuning. LIVE_VAD_DEFAULTS=1 restores Gemini's defaults (used only for A/B measurement).
+          ...(process.env.LIVE_VAD_DEFAULTS === '1' ? {} : {
+            // End the caller's turn promptly after a short pause, even with room noise in the background.
+            // Start sensitivity stays at the default: LOW made the agent miss short questions under noise.
+            realtimeInputConfig: {
+              automaticActivityDetection: {
+                endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
+                prefixPaddingMs: 120,
+                silenceDurationMs: 650,
               },
-              {
-                name: "submit_reservation_data",
-                description: `Emits the finalized, backend-approved reservation contract to lock the table in SQLite database and trigger SMS confirmation for ${venue}.`,
-                parameters: {
-                  type: "object",
-                  properties: {
-                    party_size: { 
-                      type: "integer", 
-                      description: "The finalized party size (number of guests)" 
-                    },
-                    confirmed_time: { 
-                      type: "string", 
-                      description: "Confirmed reservation time in HH:MM format (e.g. 19:30 or 20:45)" 
-                    },
-                    customer_name: { 
-                      type: "string", 
-                      description: "The customer's full name" 
-                    },
-                    customer_phone: { 
-                      type: "string", 
-                      description: "The customer's contact phone number for SMS confirmation" 
-                    },
-                    venue: { 
-                      type: "string", 
-                      description: `The venue name: ${venue}` 
-                    }
-                  },
-                  required: ["party_size", "confirmed_time", "customer_name", "customer_phone", "venue"]
-                }
-              },
-              {
-                name: "submit_food_order",
-                description: `Submits a takeout or pickup food order directly to the ${ownerConfig.restaurant_name} Kitchen Pacing Engine and KDS.`,
-                parameters: {
-                  type: "object",
-                  properties: {
-                    customer_name: {
-                      type: "string",
-                      description: "The caller or guest's name"
-                    },
-                    customer_phone: {
-                      type: "string",
-                      description: "Customer contact phone for secure payment link and SMS status"
-                    },
-                    timing: {
-                      type: "string",
-                      description: "Pickup timing: 'ASAP' or scheduled timestamp (e.g. 19:45)"
-                    },
-                    items: {
-                      type: "array",
-                      description: `List of items ordered from the ${ownerConfig.restaurant_name} Menu Matrix`,
-                      items: {
-                        type: "object",
-                        properties: {
-                          item_name: { type: "string" },
-                          quantity: { type: "integer" }
-                        },
-                        required: ["item_name"]
-                      }
-                    }
-                  },
-                  required: ["customer_name", "customer_phone", "timing", "items"]
-                }
-              }
-            ]
-          }]
+            },
+            // No deliberation before speaking; answers come from the prompt context or tools.
+            thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
+          }),
+          outputAudioTranscription: {}
         },
         callbacks: {
           onmessage: (message) => {
@@ -459,9 +498,25 @@ app.prepare().then(() => {
               if (clientWs.readyState === 1) clientWs.send(JSON.stringify({ audio }));
               recordedAudioChunks.push(audio);
             }
-            
-            if (message.serverContent?.turnComplete && clientWs.readyState === 1) {
-              clientWs.send(JSON.stringify({ turnComplete: true }));
+
+            const callerText = message.serverContent?.inputTranscription?.text;
+            if (callerText) {
+              // The caller is talking: anything the agent said before this no longer counts for the confirmation gate.
+              agentTurnText = '';
+              appendTranscript('user', callerText);
+              if (clientWs.readyState === 1) clientWs.send(JSON.stringify({ transcript: { role: 'caller', text: callerText } }));
+            }
+            const agentText = message.serverContent?.outputTranscription?.text;
+            if (agentText) {
+              appendTranscript('agent', agentText);
+              agentTurnText += agentText;
+              if (clientWs.readyState === 1) clientWs.send(JSON.stringify({ transcript: { role: 'agent', text: agentText } }));
+            }
+
+            if (message.serverContent?.turnComplete) {
+              closeTranscriptTurn();
+              agentTurnText = '';
+              if (clientWs.readyState === 1) clientWs.send(JSON.stringify({ turnComplete: true }));
             }
             
             if (message.serverContent?.interrupted && clientWs.readyState === 1) {
@@ -471,180 +526,223 @@ app.prepare().then(() => {
             const functionCalls = message.toolCall?.functionCalls;
             if (functionCalls && functionCalls.length > 0) {
               for (const call of functionCalls) {
-                if (call.name === "check_availability") {
-                  const targetTime = String(call.args?.target_time || '').trim();
-                  const partySize = Number(call.args?.party_size) || 2;
-                  const reqVenue = call.args?.venue || venue;
-
-                  console.log(`[Tool Call: check_availability] venue=${reqVenue}, size=${partySize}, time=${targetTime}`);
-
-                  // Re-query latest seating from SQLite if available, else session floorTables
-                  let currentFloor = floorTables;
-                  if (sqliteDb) {
-                    try {
-                      const latestTables = sqliteDb.prepare("SELECT * FROM seating_plan ORDER BY capacity ASC").all();
-                      if (latestTables && latestTables.length > 0) {
-                        currentFloor = latestTables;
-                      }
-                    } catch (e) {}
-                  }
-
-                  const isPeakHour = (targetTime === '20:00' || targetTime.includes('20:00') || targetTime === '8:00 PM' || targetTime === '8:00' || targetTime === '08:00 PM');
-                  const maxFloorCapacity = Math.max(...currentFloor.map(t => Number(t.capacity) || 0), 0);
-
-                  // Find candidate matching party size
-                  const matchingCandidate = currentFloor.find(t => 
-                    Number(t.capacity) >= partySize && 
-                    t.stage === 'AVAILABLE'
-                  );
-
-                  let responsePayload;
-                  if (partySize > maxFloorCapacity) {
-                    // Party size exceeds any individual table
-                    const communal = currentFloor.find(t => t.table_category === 'Communal' || t.type === 'COMMUNAL');
-                    if (communal && Number(communal.capacity) >= partySize) {
-                      responsePayload = {
-                        status: "available",
-                        table_assigned: communal.label || communal.id,
-                        capacity: communal.capacity,
-                        seating_type: "Communal Table",
-                        note: `Party of ${partySize} can be accommodated at our long communal table.`
-                      };
+                const args = call.args || {};
+                const sendToClient = (payload) => {
+                  if (clientWs.readyState === 1) clientWs.send(JSON.stringify(payload));
+                };
+                let responded = false;
+                let pendingSent = false;
+                let slowTimer = null;
+                // Resolves the call exactly once. If the model was already told "still checking",
+                // the real result is handed over as a new turn so the agent speaks it straight away.
+                const respond = (response) => {
+                  if (responded) return;
+                  responded = true;
+                  if (slowTimer) clearTimeout(slowTimer);
+                  sendToClient({
+                    activity: {
+                      id: call.id,
+                      tool: call.name,
+                      phase: 'completed',
+                      status: response?.status || 'ok',
+                      detail: activityDetail(response),
+                    }
+                  });
+                  try {
+                    if (!pendingSent) {
+                      session.sendToolResponse({
+                        functionResponses: [{ id: call.id, name: call.name, response }]
+                      });
                     } else {
-                      responsePayload = {
-                        status: "unavailable",
-                        reason: `Largest individual table fits ${maxFloorCapacity} guests.`,
-                        alternatives: ["17:30", "21:00"],
-                        packed_house_options: ["Communal seating", "Split tables", "Sister venue at Commercial Dr"]
-                      };
+                      session.sendClientContent({
+                        turns: [{
+                          role: 'user',
+                          parts: [{ text: `Booking system update (not spoken by the caller): the result for ${call.name} is ready: ${JSON.stringify(response)}. Tell the caller the outcome now in plain speech, briefly, following all rules.` }]
+                        }],
+                        turnComplete: true
+                      });
                     }
-                  } else if (isPeakHour && !matchingCandidate) {
-                    const barStools = currentFloor.filter(t => (t.type === 'BAR' || t.table_category === 'Bar') && t.stage === 'AVAILABLE');
-                    responsePayload = {
-                      status: "unavailable",
-                      alternatives: ["19:15", "20:45"],
-                      packed_house_options: barStools.length >= partySize ? ["Bar seating available"] : ["Waitlist", "Sister venue at Commercial Dr"]
-                    };
-                  } else if (matchingCandidate) {
-                    responsePayload = {
-                      status: "available",
-                      table_assigned: matchingCandidate.label || matchingCandidate.id,
-                      capacity: matchingCandidate.capacity,
-                      seating_type: matchingCandidate.type || matchingCandidate.table_category || "Table",
-                      venue: reqVenue
-                    };
-                  } else {
-                    responsePayload = {
-                      status: "available",
-                      venue: reqVenue
-                    };
+                  } catch (err) {
+                    console.warn("Could not return tool response", err);
                   }
+                };
+                const logTool = (result) => {
+                  toolCallsLog.push({ name: call.name, args, result, timestamp: new Date().toISOString() });
+                };
+                const reservationCtx = () => ({ db: sqliteDb, venue, tables: currentFloorTables(), now: new Date() });
+                const RESERVATION_UNAVAILABLE = { status: 'error', message: 'The booking system is unavailable right now. Offer a staff callback.' };
 
-                  toolCallsLog.push({
-                    name: call.name,
-                    args: call.args,
-                    result: responsePayload,
-                    timestamp: new Date().toISOString()
-                  });
+                // Real start event; the UI shows it until the matching 'completed' event arrives.
+                sendToClient({ activity: { id: call.id, tool: call.name, phase: 'started' } });
 
-                  if (clientWs.readyState === 1) {
-                    clientWs.send(JSON.stringify({
-                      toolEvent: 'check_availability',
-                      callId: call.id,
-                      arguments: call.args,
-                      result: responsePayload
-                    }));
-                  }
-
-                  session.sendToolResponse({
-                    functionResponses: [{
-                      id: call.id,
-                      name: call.name,
-                      response: responsePayload
-                    }]
-                  });
-                } else if (call.name === "submit_reservation_data") {
-                  console.log(`[Tool Call: submit_reservation_data] args=`, call.args);
-                  callerName = call.args?.customer_name || callerName;
-                  callerPhone = call.args?.customer_phone || callerPhone;
-                  const confId = "RES-" + Math.floor(100000 + Math.random() * 900000);
-                  const assignedTable = call.args?.table_assigned || 'Standard Seating';
-                  reservationSummary = `Locked table for ${call.args?.party_size || 2} guests at ${call.args?.confirmed_time || '7:00 PM'} for ${callerName}. Conf: ${confId}`;
-
-                  // Persist reservation to SQLite seating table if applicable
-                  if (sqliteDb && call.args?.table_assigned) {
-                    try {
-                      sqliteDb.prepare("UPDATE seating_plan SET stage = 'LOCKED', occupant_name = ? WHERE label = ? OR id = ?")
-                        .run(callerName, call.args.table_assigned, call.args.table_assigned);
-                    } catch (e) {
-                      console.warn("Could not update table stage in SQLite:", e);
-                    }
-                  }
-
-                  toolCallsLog.push({
-                    name: call.name,
-                    args: call.args,
-                    result: { status: "locked", confirmation_id: confId, assigned_table: assignedTable },
-                    timestamp: new Date().toISOString()
-                  });
-                  
-                  if (clientWs.readyState === 1) {
-                    clientWs.send(JSON.stringify({ 
-                      functionCall: {
+                // A blocking tool call keeps the model silent until it gets a response. If the booking
+                // system is slow, answer "still checking" so the agent can talk to the caller meanwhile.
+                slowTimer = setTimeout(() => {
+                  if (responded) return;
+                  pendingSent = true;
+                  console.log(`[Tool Call: ${call.name}] slow, told the agent to keep the caller informed`);
+                  sendToClient({ activity: { id: call.id, tool: call.name, phase: 'slow' } });
+                  try {
+                    session.sendToolResponse({
+                      functionResponses: [{
+                        id: call.id,
                         name: call.name,
-                        arguments: call.args
-                      } 
-                    }));
+                        response: {
+                          status: 'pending',
+                          message: 'The booking system is still working on this. Briefly and kindly tell the caller you are still checking, matching their mood. Do not guess or hint at the result; it will arrive in a following message.'
+                        }
+                      }]
+                    });
+                  } catch (err) {
+                    console.warn("Could not send pending tool response", err);
                   }
+                }, SLOW_TOOL_MS);
 
-                  session.sendToolResponse({
-                    functionResponses: [{
-                      id: call.id,
-                      name: call.name,
-                      response: { 
-                        status: "locked",
-                        confirmation_id: confId,
-                        sms_status: "queued" 
-                      }
-                    }]
-                  });
-                } else if (call.name === "submit_food_order") {
-                  console.log(`[Tool Call: submit_food_order] args=`, call.args);
-                  callerName = call.args?.customer_name || callerName;
-                  callerPhone = call.args?.customer_phone || callerPhone;
-                  const ticketId = "TKT-" + Math.floor(100 + Math.random() * 900);
-                  const itemCount = Array.isArray(call.args?.items) ? call.args.items.length : 1;
-                  orderSummary = `Takeout ${call.args?.timing || 'ASAP'} (${itemCount} items) for ${callerName}. Paced in Kitchen. Ticket: ${ticketId}`;
-
-                  toolCallsLog.push({
-                    name: call.name,
-                    args: call.args,
-                    result: { status: "paced_and_queued", order_id: ticketId },
-                    timestamp: new Date().toISOString()
-                  });
-                  
-                  if (clientWs.readyState === 1) {
-                    clientWs.send(JSON.stringify({ 
-                      functionCall: {
-                        name: call.name,
-                        arguments: call.args
-                      } 
-                    }));
-                  }
-
-                  session.sendToolResponse({
-                    functionResponses: [{
-                      id: call.id,
-                      name: call.name,
-                      response: { 
-                        status: "paced_and_queued",
-                        order_id: ticketId,
-                        kitchen_status: "hold_queue_active",
-                        sms_payment_link: "sent"
-                      }
-                    }]
-                  });
+                const run = async () => {
+                if (TOOL_TEST_DELAY_MS > 0) await new Promise(r => setTimeout(r, TOOL_TEST_DELAY_MS));
+                try {
+                // Confirmation gate: if the agent's current turn ends with a question ("Shall I book that?"),
+                // it hasn't heard the caller's answer yet. Hold the change until the caller replies.
+                const CONFIRM_GATED = ['submit_reservation_data', 'modify_reservation', 'cancel_reservation'];
+                if (CONFIRM_GATED.includes(call.name) && /\?\s*$/.test(agentTurnText.trim())) {
+                  const held = {
+                    status: 'awaiting_confirmation',
+                    message: 'Nothing was saved yet because you just asked the caller to confirm. Say nothing more now and do not mention this note or apologise; simply wait for their answer. If they say yes, call this tool again with the same details.'
+                  };
+                  console.log(`[Tool Call: ${call.name}] held until the caller confirms`);
+                  logTool(held);
+                  respond(held);
+                  return;
                 }
+                if (call.name === "check_availability") {
+                  const date = args.date || todayISO();
+                  const result = sqliteDb
+                    ? checkAvailability(reservationCtx(), { party_size: args.party_size, date, time: args.target_time })
+                    : RESERVATION_UNAVAILABLE;
+                  console.log(`[Tool Call: check_availability] status=${result.status}`);
+                  logTool(result);
+                  sendToClient({ toolEvent: 'check_availability', callId: call.id, arguments: { ...args, date, venue }, result });
+                  respond(result);
+                } else if (call.name === "submit_reservation_data") {
+                  const result = sqliteDb
+                    ? createReservation(reservationCtx(), {
+                        customer_name: args.customer_name,
+                        customer_phone: args.customer_phone,
+                        party_size: args.party_size,
+                        date: args.date,
+                        time: args.confirmed_time,
+                        special_requests: args.special_requests,
+                      })
+                    : RESERVATION_UNAVAILABLE;
+                  console.log(`[Tool Call: submit_reservation_data] status=${result.status}`);
+                  logTool(result);
+                  if (result.status === 'confirmed') {
+                    sessionBooking = { code: result.reservation.confirmation_code, phone: String(args.customer_phone) };
+                    callerName = result.reservation.customer_name;
+                    callerPhone = args.customer_phone;
+                    reservationSummary = `Confirmed ${result.reservation.party_size} guests at ${result.reservation.time} on ${result.reservation.date}. Code ${result.reservation.confirmation_code}.`;
+                    sendToClient({
+                      functionCall: {
+                        name: call.name,
+                        arguments: {
+                          ...args,
+                          customer_name: result.reservation.customer_name,
+                          party_size: result.reservation.party_size,
+                          confirmed_time: result.reservation.time,
+                          date: result.reservation.date,
+                          venue,
+                        }
+                      }
+                    });
+                  }
+                  sendToClient({ toolResult: { name: call.name, result } });
+                  respond(result);
+                } else if (call.name === "find_reservation") {
+                  const result = sqliteDb
+                    ? findReservations(reservationCtx(), {
+                        confirmation_code: args.confirmation_code,
+                        customer_phone: args.customer_phone,
+                        customer_name: args.customer_name,
+                      })
+                    : RESERVATION_UNAVAILABLE;
+                  console.log(`[Tool Call: find_reservation] status=${result.status}`);
+                  if (result.status === 'found' && result.reservations.length === 1) {
+                    sessionBooking = { code: result.reservations[0].confirmation_code, phone: String(args.customer_phone) };
+                  }
+                  logTool({ status: result.status, count: result.reservations?.length ?? 0 });
+                  respond(result);
+                } else if (call.name === "modify_reservation") {
+                  const result = sqliteDb
+                    ? modifyReservation(reservationCtx(), {
+                        confirmation_code: args.confirmation_code || sessionBooking?.code,
+                        customer_phone: args.customer_phone || sessionBooking?.phone,
+                        party_size: args.new_party_size,
+                        date: args.new_date,
+                        time: args.new_time,
+                        special_requests: args.special_requests ?? undefined,
+                      })
+                    : RESERVATION_UNAVAILABLE;
+                  if (result.status === 'modified') {
+                    reservationSummary = `Changed to ${result.reservation.party_size} guests at ${result.reservation.time} on ${result.reservation.date}. Code ${result.reservation.confirmation_code}.`;
+                  }
+                  console.log(`[Tool Call: modify_reservation] status=${result.status}`);
+                  logTool(result);
+                  sendToClient({ toolResult: { name: call.name, result } });
+                  respond(result);
+                } else if (call.name === "cancel_reservation") {
+                  const result = sqliteDb
+                    ? cancelReservation(reservationCtx(), {
+                        confirmation_code: args.confirmation_code || sessionBooking?.code,
+                        customer_phone: args.customer_phone || sessionBooking?.phone,
+                      })
+                    : RESERVATION_UNAVAILABLE;
+                  if (result.status === 'cancelled') {
+                    sessionBooking = null;
+                    reservationSummary = `Cancelled reservation ${result.reservation.confirmation_code} (${result.reservation.party_size} guests, ${result.reservation.time} on ${result.reservation.date}).`;
+                  }
+                  console.log(`[Tool Call: cancel_reservation] status=${result.status}`);
+                  logTool(result);
+                  sendToClient({ toolResult: { name: call.name, result } });
+                  respond(result);
+                } else if (call.name === "request_staff_callback") {
+                  if (args.customer_name && callerName === 'Guest Caller') callerName = String(args.customer_name).slice(0, 80);
+                  if (args.customer_phone) callerPhone = String(args.customer_phone).slice(0, 40);
+                  handoffSummary = `Callback requested: ${String(args.reason || 'not specified').slice(0, 200)}`;
+                  const result = {
+                    status: 'callback_requested',
+                    message: 'Recorded for staff follow-up. A live transfer is not available on this line.'
+                  };
+                  console.log(`[Tool Call: request_staff_callback] recorded`);
+                  logTool(result);
+                  sendToClient({ toolResult: { name: call.name, result } });
+                  respond(result);
+                } else if (call.name === "submit_food_order") {
+                  callerName = args.customer_name || callerName;
+                  callerPhone = args.customer_phone || callerPhone;
+                  const ticketId = "TKT-" + Math.floor(100 + Math.random() * 900);
+                  const itemCount = Array.isArray(args.items) ? args.items.length : 1;
+                  orderSummary = `Takeout ${args.timing || 'ASAP'} (${itemCount} items) for ${callerName}. Ticket: ${ticketId}`;
+                  const result = {
+                    status: 'received',
+                    order_id: ticketId,
+                    payment_link: 'not_sent',
+                    message: 'Order sent to the kitchen. No payment link was sent.'
+                  };
+                  logTool(result);
+                  sendToClient({ functionCall: { name: call.name, arguments: args } });
+                  respond(result);
+                } else {
+                  respond({ status: 'error', message: `Unknown tool ${call.name}` });
+                }
+                } catch (err) {
+                  // Never leave the model waiting on a tool that threw; it would go silent.
+                  console.error(`[Tool Call: ${call.name}] failed`, err);
+                  if (!responded) {
+                    respond({ status: 'error', message: 'The system hit an error. Apologise briefly and offer a staff callback.' });
+                  }
+                }
+                };
+                run();
               }
             }
           },
@@ -704,6 +802,9 @@ app.prepare().then(() => {
       
       const finalizeCallSession = async () => {
         clearInterval(pingInterval);
+        // Close the Gemini Live session and our DB handle; both used to leak on every call.
+        try { session?.close(); } catch (e) { /* already closed */ }
+        try { sqliteDb?.close(); } catch (e) { /* already closed */ }
         const callEndTime = new Date();
         const durationSecs = Math.max(1, Math.round((callEndTime.getTime() - callStartTime.getTime()) / 1000));
 
@@ -734,7 +835,7 @@ app.prepare().then(() => {
               callEndTime.toISOString(),
               durationSecs,
               'completed',
-              reservationSummary ? 'reservation' : orderSummary ? 'takeout' : 'inquiry',
+              reservationSummary ? 'reservation' : orderSummary ? 'takeout' : handoffSummary ? 'handoff' : 'inquiry',
               JSON.stringify(finalTranscript),
               recordedAudioChunks.length > 0 ? recordedAudioChunks.slice(0, 50).join('') : null,
               JSON.stringify(toolCallsLog),

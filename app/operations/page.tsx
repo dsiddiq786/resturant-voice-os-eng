@@ -1,5 +1,5 @@
-import RestaurantApp from '@/components/RestaurantApp';
+import Operations from '@/components/brand/Operations';
 
 export default function OperationsPage() {
-  return <RestaurantApp initialMode="operations" />;
+  return <Operations />;
 }

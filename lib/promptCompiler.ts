@@ -1,5 +1,6 @@
 export interface OwnerPersonaConfig {
   restaurant_name: string;
+  agent_name?: string;
   tone: string;
   greeting: string;
   voice_name?: string;
@@ -132,7 +133,7 @@ ${owner.master_instructions}
     : '';
 
   return `// --- SECTION 1: OWNER'S CUSTOM PERSONA (DYNAMIC) ---
-You are the virtual host for ${restaurantName} (${venue}).
+You are the virtual host for ${restaurantName} (${venue}).${owner.agent_name?.trim() ? ` Your name is ${owner.agent_name.trim()}.` : ''}
 Your tone is ${tone}.
 When the call connects, you must greet the caller with exactly this sentence: "${greeting}"
 

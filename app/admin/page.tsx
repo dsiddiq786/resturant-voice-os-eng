@@ -6,5 +6,5 @@ import { useRouter } from 'next/navigation';
 
 export default function AdminPage() {
   const router = useRouter();
-  return <OwnerControlPanel onSwitchToOperations={() => router.push('/')} />;
+  return <OwnerControlPanel onSwitchToOperations={() => router.push('/operations')} />;
 }
