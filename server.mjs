@@ -5,6 +5,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { ensureReservationSchema, checkAvailability, createReservation, findReservations, modifyReservation, cancelReservation, todayISO } from './lib/reservations.mjs';
 import { voiceToolDeclarations } from './lib/voiceTools.mjs';
 
+// After this long without a result, the agent is told to keep the caller informed while it waits.
+const SLOW_TOOL_MS = 1500;
+// Test-only: delay every tool result to simulate a slow external booking system. Unset in normal use.
+const TOOL_TEST_DELAY_MS = Number(process.env.VOICE_TOOL_DELAY_MS || 0);
+
 // Minimal, non-sensitive summary of a tool result for the live activity timeline.
 function activityDetail(result) {
   if (!result) return null;
@@ -36,7 +41,7 @@ function openSqlite() {
 import { join, resolve, sep } from 'path';
 import next from 'next';
 import { WebSocketServer } from 'ws';
-import { GoogleGenAI, Modality } from '@google/genai';
+import { GoogleGenAI, Modality, EndSensitivity, ThinkingLevel } from '@google/genai';
 
 // In production mode (dev: false), Next.js strictly requires .next/BUILD_ID,
 // .next/routes-manifest.json, .next/prerender-manifest.json, and .next/server/app-paths-manifest.json.
@@ -64,7 +69,8 @@ function compileSystemPrompt(owner, menuItems, floorTables) {
   const restaurantName = owner.restaurant_name || "leed pizza";
   const venue = owner.venue || `${restaurantName} Main St`;
   const tone = owner.tone || "Lively & Casual";
-  const greeting = owner.greeting || `Thanks for calling ${restaurantName}, this is your virtual host, how can I help you today?`;
+  const agentName = owner.agent_name || 'Talkie';
+  const greeting = owner.greeting || `Thanks for calling ${restaurantName}, this is ${agentName}, how can I help you today?`;
   const canadianDialect = owner.canadian_dialect !== false;
 
   const activeItems = (menuItems || []).filter(i => !i.is_86);
@@ -148,7 +154,7 @@ ${owner.master_instructions}
   const today = todayISO();
   const weekday = new Date().toLocaleDateString('en-US', { weekday: 'long' });
   return `// --- SECTION 1: OWNER'S CUSTOM PERSONA (DYNAMIC) ---
-You are the virtual host for ${restaurantName} (${venue}).
+You are ${agentName}, the AI host for ${restaurantName} (${venue}). Your name is ${agentName}; if a caller asks who they are speaking with, say you are ${agentName}, the restaurant's AI host.
 Your tone is ${tone}.
 When the call connects, you must greet the caller with exactly this sentence: "${greeting}"
 Today is ${weekday}, ${today} (YYYY-MM-DD). Use it to convert "tonight" and "tomorrow" into dates.
@@ -211,13 +217,22 @@ ${soldOutText}
 - Tool errors: if a tool returns an error or is unavailable, say so plainly. Do not guess the result.
 - Grounding: never say "we have availability", "that's available", "you're booked", "it's moved" or "it's cancelled" unless a tool result in this conversation says exactly that. If you have not called the tool yet, call it now instead of guessing.
 - Confirmation: if you ask the caller "shall I…?", stop and wait for their answer before calling the tool. If the caller has already clearly asked for a change or cancellation of a booking you just read back, you may go ahead without asking again.
-- No silence while working: before you call check_availability, submit_reservation_data, find_reservation, modify_reservation or cancel_reservation, first say one short, natural acknowledgment (for example "Of course, let me check that for you." or "One moment, I'll look that up."), then call the tool in the same turn. Say it once. Do not repeat "please wait". Do not describe or hint at the result until the tool has returned. For answers you already have from this prompt, such as menu prices, answer directly with no filler.
+- Speed: start speaking immediately. Lead with the answer in your first few words, then add detail. Keep each reply to one or two short sentences.
+- You already know the full menu, prices, dietary tags and seating from this prompt. Answer those instantly. Never say you are loading, pulling up, fetching or looking up information unless you are calling a tool in that same turn.
+- No silence while a tool runs: before you call check_availability, submit_reservation_data, find_reservation, modify_reservation or cancel_reservation, first say one short acknowledgment, then call the tool in the same turn. Fit the acknowledgment to how the caller sounds. These are tone guides only; never say words like "relaxed", "hurry", "mood" or "calm" out loud:
+  - a chatty caller hears something warm, such as: Ooh, lovely, let me check that for you.
+  - a caller in a rush hears something brisk, such as: One sec, checking now.
+  - an annoyed caller hears something empathetic, such as: I understand, let me sort that out right away.
+  - a hesitant caller hears something reassuring, such as: No problem at all, let me take a look.
+  Use your own words each time; never repeat the same phrase in a call. Say it once; do not repeat "please wait". Do not hint at the result until the tool returns.
+- If a tool result says the system is slow or still working, tell the caller briefly and kindly that you are still checking, in their mood, then wait for the result. Never invent the result.
 - Keep replies to one or two short sentences unless the caller asks for more.
 
 // --- SECTION 3: LIVE VENUE FLOOR PLAN & SEATING MATRIX ---
 ${floorPlanText}
 
 // --- SECTION 4: OWNER MASTER DIRECTIVES & SPECIFIC POLICIES ---
+(Owner directives add style and house preferences. Where they conflict with Sections 2, 2A or 2B, Sections 2, 2A and 2B win.)
 ${customRulesText}
 
 ${masterInstructions}`.trim();
@@ -291,6 +306,8 @@ app.prepare().then(() => {
       }
     };
     const closeTranscriptTurn = () => { transcriptTurnOpen = false; };
+    // What the agent has said so far in its current turn (used by the confirmation gate).
+    let agentTurnText = '';
     const toolCallsLog = [];
     let recordedAudioChunks = [];
     let reservationSummary = null;
@@ -316,7 +333,7 @@ app.prepare().then(() => {
       let ownerConfig = {
         voice_name: "Leda",
         restaurant_name: "leed pizza",
-        greeting: "Thanks for calling leed pizza, this is your virtual host, how can I help you today?",
+        greeting: "Thanks for calling leed pizza, this is Talkie, how can I help you today?",
         tone: "Lively & Casual",
         venue: "leed pizza Main St",
         canadian_dialect: true
@@ -448,6 +465,8 @@ app.prepare().then(() => {
           responseModalities: [Modality.AUDIO],
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: selectedVoice } },
+            // Pin the call language so transcription doesn't guess another language on short phrases.
+            languageCode: 'en-US',
           },
           systemInstruction: {
             parts: [{ text: systemInstruction }]
@@ -455,6 +474,20 @@ app.prepare().then(() => {
           tools: [{ functionDeclarations: voiceToolDeclarations() }],
           // Text transcripts of both sides, used for the live transcript and the stored call record.
           inputAudioTranscription: {},
+          // Latency tuning. LIVE_VAD_DEFAULTS=1 restores Gemini's defaults (used only for A/B measurement).
+          ...(process.env.LIVE_VAD_DEFAULTS === '1' ? {} : {
+            // End the caller's turn promptly after a short pause, even with room noise in the background.
+            // Start sensitivity stays at the default: LOW made the agent miss short questions under noise.
+            realtimeInputConfig: {
+              automaticActivityDetection: {
+                endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
+                prefixPaddingMs: 120,
+                silenceDurationMs: 650,
+              },
+            },
+            // No deliberation before speaking; answers come from the prompt context or tools.
+            thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
+          }),
           outputAudioTranscription: {}
         },
         callbacks: {
@@ -467,17 +500,21 @@ app.prepare().then(() => {
 
             const callerText = message.serverContent?.inputTranscription?.text;
             if (callerText) {
+              // The caller is talking: anything the agent said before this no longer counts for the confirmation gate.
+              agentTurnText = '';
               appendTranscript('user', callerText);
               if (clientWs.readyState === 1) clientWs.send(JSON.stringify({ transcript: { role: 'caller', text: callerText } }));
             }
             const agentText = message.serverContent?.outputTranscription?.text;
             if (agentText) {
               appendTranscript('agent', agentText);
+              agentTurnText += agentText;
               if (clientWs.readyState === 1) clientWs.send(JSON.stringify({ transcript: { role: 'agent', text: agentText } }));
             }
 
             if (message.serverContent?.turnComplete) {
               closeTranscriptTurn();
+              agentTurnText = '';
               if (clientWs.readyState === 1) clientWs.send(JSON.stringify({ turnComplete: true }));
             }
             
@@ -493,8 +530,14 @@ app.prepare().then(() => {
                   if (clientWs.readyState === 1) clientWs.send(JSON.stringify(payload));
                 };
                 let responded = false;
+                let pendingSent = false;
+                let slowTimer = null;
+                // Resolves the call exactly once. If the model was already told "still checking",
+                // the real result is handed over as a new turn so the agent speaks it straight away.
                 const respond = (response) => {
+                  if (responded) return;
                   responded = true;
+                  if (slowTimer) clearTimeout(slowTimer);
                   sendToClient({
                     activity: {
                       id: call.id,
@@ -505,9 +548,19 @@ app.prepare().then(() => {
                     }
                   });
                   try {
-                    session.sendToolResponse({
-                      functionResponses: [{ id: call.id, name: call.name, response }]
-                    });
+                    if (!pendingSent) {
+                      session.sendToolResponse({
+                        functionResponses: [{ id: call.id, name: call.name, response }]
+                      });
+                    } else {
+                      session.sendClientContent({
+                        turns: [{
+                          role: 'user',
+                          parts: [{ text: `Booking system update (not spoken by the caller): the result for ${call.name} is ready: ${JSON.stringify(response)}. Tell the caller the outcome now in plain speech, briefly, following all rules.` }]
+                        }],
+                        turnComplete: true
+                      });
+                    }
                   } catch (err) {
                     console.warn("Could not return tool response", err);
                   }
@@ -520,7 +573,46 @@ app.prepare().then(() => {
 
                 // Real start event; the UI shows it until the matching 'completed' event arrives.
                 sendToClient({ activity: { id: call.id, tool: call.name, phase: 'started' } });
+
+                // A blocking tool call keeps the model silent until it gets a response. If the booking
+                // system is slow, answer "still checking" so the agent can talk to the caller meanwhile.
+                slowTimer = setTimeout(() => {
+                  if (responded) return;
+                  pendingSent = true;
+                  console.log(`[Tool Call: ${call.name}] slow, told the agent to keep the caller informed`);
+                  sendToClient({ activity: { id: call.id, tool: call.name, phase: 'slow' } });
+                  try {
+                    session.sendToolResponse({
+                      functionResponses: [{
+                        id: call.id,
+                        name: call.name,
+                        response: {
+                          status: 'pending',
+                          message: 'The booking system is still working on this. Briefly and kindly tell the caller you are still checking, matching their mood. Do not guess or hint at the result; it will arrive in a following message.'
+                        }
+                      }]
+                    });
+                  } catch (err) {
+                    console.warn("Could not send pending tool response", err);
+                  }
+                }, SLOW_TOOL_MS);
+
+                const run = async () => {
+                if (TOOL_TEST_DELAY_MS > 0) await new Promise(r => setTimeout(r, TOOL_TEST_DELAY_MS));
                 try {
+                // Confirmation gate: if the agent's current turn ends with a question ("Shall I book that?"),
+                // it hasn't heard the caller's answer yet. Hold the change until the caller replies.
+                const CONFIRM_GATED = ['submit_reservation_data', 'modify_reservation', 'cancel_reservation'];
+                if (CONFIRM_GATED.includes(call.name) && /\?\s*$/.test(agentTurnText.trim())) {
+                  const held = {
+                    status: 'awaiting_confirmation',
+                    message: 'Nothing was saved yet because you just asked the caller to confirm. Say nothing more now and do not mention this note or apologise; simply wait for their answer. If they say yes, call this tool again with the same details.'
+                  };
+                  console.log(`[Tool Call: ${call.name}] held until the caller confirms`);
+                  logTool(held);
+                  respond(held);
+                  return;
+                }
                 if (call.name === "check_availability") {
                   const date = args.date || todayISO();
                   const result = sqliteDb
@@ -648,6 +740,8 @@ app.prepare().then(() => {
                     respond({ status: 'error', message: 'The system hit an error. Apologise briefly and offer a staff callback.' });
                   }
                 }
+                };
+                run();
               }
             }
           },

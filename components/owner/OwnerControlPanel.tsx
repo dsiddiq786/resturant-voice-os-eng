@@ -3,232 +3,172 @@
 import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
-  LayoutDashboard, AudioLines, ScrollText, Store, UtensilsCrossed, Armchair, CalendarDays, PhoneCall,
-  PlugZap, Rocket, ArrowRight, Loader2, Check, CircleDot,
+  Home, AudioLines, ScrollText, UtensilsCrossed, Armchair, CalendarDays, PhoneCall, PlugZap, Rocket, Loader2, Check,
 } from 'lucide-react';
-import Workspace, { PageHead, Figures, type WorkspaceSection } from '@/components/lux/Workspace';
+import Workspace, { PageHead, Stats, SectionTitle, type Section } from '@/components/brand/Workspace';
+import { ArrowChip } from '@/components/brand/SiteNav';
 import VoicePersonaConfig from './VoicePersonaConfig';
 import FloorPlanBuilder from './FloorPlanBuilder';
 import MenuBuilder from './MenuBuilder';
 import DeployPanel from './DeployPanel';
 import MasterPromptControl from './MasterPromptControl';
-import ReservationsPanel, { useReservations } from '@/components/lux/data/ReservationsPanel';
-import CallsPanel, { useCalls, needsAttention } from '@/components/lux/data/CallsPanel';
-import { todayISO } from '@/components/lux/data/useApiList';
+import ReservationsPanel, { useReservations } from '@/components/brand/data/ReservationsPanel';
+import CallsPanel, { useCalls, needsAttention } from '@/components/brand/data/CallsPanel';
+import { todayISO } from '@/components/brand/data/useApiList';
+import { useMounted } from '@/components/brand/useMounted';
 import { useOwnerConfig } from '@/lib/ownerConfigContext';
-import { useMounted } from '@/components/lux/useMounted';
 
-export type OwnerNavTab =
-  | 'overview' | 'voice' | 'prompt' | 'profile' | 'menu' | 'floor' | 'reservations' | 'calls' | 'integrations' | 'deploy';
+export type OwnerNavTab = 'home' | 'host' | 'prompt' | 'menu' | 'floor' | 'bookings' | 'calls' | 'integrations' | 'publish';
 
 interface OwnerControlPanelProps {
   onSwitchToOperations?: () => void;
 }
 
-function since(iso?: string) {
-  if (!iso) return 'never';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return 'unknown';
-  return d.toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+function PublishButton({ small = true }: { small?: boolean }) {
+  const { saveAndDeploy, isDeploying, deploySuccess, hasUnsavedChanges } = useOwnerConfig();
+  return (
+    <button type="button" onClick={saveAndDeploy} disabled={isDeploying || !hasUnsavedChanges} className={`lp-btn lp-btn-primary ${small ? 'lp-btn-sm' : ''}`}>
+      {isDeploying ? 'Publishing' : deploySuccess ? 'Published' : 'Publish changes'}
+      <span className="lp-chip" aria-hidden="true">
+        {isDeploying ? <Loader2 className="animate-spin" /> : deploySuccess ? <Check /> : <Rocket />}
+      </span>
+    </button>
+  );
 }
 
-// ---------------- Overview ----------------
-function Overview({ go }: { go: (t: OwnerNavTab) => void }) {
-  const { ownerConfig, selectedVoice, menuItems, floorTables, hasUnsavedChanges } = useOwnerConfig();
+// ---------------- Home ----------------
+function HomeView({ go }: { go: (t: OwnerNavTab) => void }) {
+  const { ownerConfig, selectedVoice, menuItems, hasUnsavedChanges } = useOwnerConfig();
+  const agent = ownerConfig.agent_name || 'Talkie';
   const mounted = useMounted();
   const calls = useCalls();
   const reservations = useReservations();
   const today = todayISO();
-
-  const attention = calls.items.filter(needsAttention);
-  const upcoming = reservations.items.filter(r => r.status === 'CONFIRMED' && r.reservation_date >= today);
-  const handled = reservations.items.length;
+  const attention = calls.items.filter(needsAttention).length;
+  const upcoming = reservations.items.filter(r => r.status === 'CONFIRMED' && r.reservation_date >= today).length;
   const available = menuItems.filter(m => !m.is_86).length;
+  const published = ownerConfig.last_deployed_at && mounted
+    ? new Date(ownerConfig.last_deployed_at).toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+    : '—';
 
   return (
     <>
-      <PageHead
-        eyebrow="Owner Portal"
-        title={<>Good to see you. <em className="italic text-[var(--lux-champagne)]">Here is your concierge.</em></>}
-        description="What the AI host is saying to guests, what it has booked, and what needs a person."
-        actions={
-          <>
-            <Link href="/" className="lux-btn lux-btn-ghost lux-btn-sm">Talk to it</Link>
-            <button type="button" onClick={() => go('voice')} className="lux-btn lux-btn-primary lux-btn-sm">Configure agent</button>
-          </>
-        }
-      />
+      <PageHead label="Owner portal" title="Your restaurant at a glance" />
 
-      {/* Agent identity */}
-      <section className="grid gap-10 border-b border-[var(--lux-line)] pb-12 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
-        <div>
-          <p className="lux-eyebrow mb-4">Greeting guests hear</p>
-          <blockquote className="lux-serif text-[clamp(26px,3vw,36px)] italic leading-snug text-[var(--lux-ivory)]">
-            “{ownerConfig.greeting}”
-          </blockquote>
-        </div>
-        <dl className="grid grid-cols-2 gap-x-8 gap-y-6 self-end text-[13.5px]">
-          <div><dt className="lux-muted text-[12px]">Voice</dt><dd className="mt-1">{selectedVoice?.label || ownerConfig.voice_name}</dd></div>
-          <div><dt className="lux-muted text-[12px]">Tone</dt><dd className="mt-1">{ownerConfig.tone}</dd></div>
-          <div><dt className="lux-muted text-[12px]">Last published</dt><dd className="mt-1">{mounted ? since(ownerConfig.last_deployed_at) : '—'}</dd></div>
+      {/* The host, front and centre */}
+      <section className="lp-panel lp-dark mb-8 overflow-hidden p-7 sm:p-9">
+        <div className="grid gap-8 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] lg:items-end">
           <div>
-            <dt className="lux-muted text-[12px]">Draft</dt>
-            <dd className="mt-1">
-              {hasUnsavedChanges
-                ? <button type="button" onClick={() => go('deploy')} className="text-[var(--lux-warn)] underline-offset-4 hover:underline">Unpublished changes</button>
-                : <span className="text-[var(--lux-ok)]">Live and in sync</span>}
-            </dd>
+            <p className="lp-label text-[var(--ion)]">{agent} · your AI host</p>
+            <p className="mt-4 font-[family-name:var(--f-display)] text-[clamp(1.6rem,2.6vw,2.3rem)] font-semibold leading-[1.15] tracking-[-0.03em]">
+              &ldquo;{ownerConfig.greeting}&rdquo;
+            </p>
+            <div className="mt-5 flex flex-wrap gap-2 text-[13px]">
+              <span className="lp-step">Voice <b>{selectedVoice?.name || ownerConfig.voice_name}</b></span>
+              <span className="lp-step">Tone <b>{ownerConfig.tone}</b></span>
+              <span className="lp-step" data-s={hasUnsavedChanges ? 'warn' : 'ok'}>Status <b>{hasUnsavedChanges ? 'Unpublished changes' : 'Live'}</b></span>
+            </div>
           </div>
-        </dl>
+          <div className="flex flex-col items-start gap-3 lg:items-end">
+            <p className="lp-label text-[var(--on-ink-muted)]">Last published · {published}</p>
+            <div className="flex flex-wrap gap-2">
+              <Link href="/" className="lp-btn lp-btn-primary">Talk to {agent}<ArrowChip /></Link>
+              <button type="button" onClick={() => go('host')} className="lp-btn lp-btn-ghost">Edit {agent}</button>
+            </div>
+          </div>
+        </div>
       </section>
 
-      <div className="mt-12">
-        <Figures
-          items={[
-            { label: 'Calls logged', value: calls.loading ? '–' : calls.items.length },
-            { label: 'Need attention', value: calls.loading ? '–' : attention.length },
-            { label: 'Bookings made by the concierge', value: reservations.loading ? '–' : handled, hint: `${upcoming.length} upcoming` },
-            { label: 'Dishes on offer', value: `${available}/${menuItems.length}`, hint: `${menuItems.length - available} sold out` },
-            { label: 'Tables configured', value: floorTables.length },
-          ]}
-        />
-      </div>
+      <Stats
+        items={[
+          { label: 'Calls handled', value: calls.loading ? '–' : calls.items.length },
+          { label: 'Need you', value: calls.loading ? '–' : attention, hint: 'Callbacks and errors' },
+          { label: `Bookings by ${agent}`, value: reservations.loading ? '–' : reservations.items.length, hint: `${upcoming} upcoming` },
+          { label: 'Dishes on offer', value: `${available}/${menuItems.length}`, hint: `${menuItems.length - available} sold out` },
+        ]}
+      />
 
-      <div className="mt-14 grid gap-14 xl:grid-cols-2">
+      <div className="mt-8 grid gap-6 xl:grid-cols-2">
         <section>
-          <div className="mb-5 flex items-end justify-between">
-            <h2 className="lux-section-title">Calls that need you</h2>
-            <button type="button" onClick={() => go('calls')} className="lux-navlink text-[13px] inline-flex items-center gap-1.5">Call history <ArrowRight size={14} /></button>
-          </div>
-          {!calls.loading && attention.length === 0 ? (
-            <div className="lux-empty"><h3>Nothing waiting</h3><p className="text-[13.5px]">Callback requests and failed bookings show up here.</p></div>
-          ) : (
-            <div className="border-t border-[var(--lux-line)]">
-              {attention.slice(0, 5).map(c => (
-                <div key={c.id} className="lux-row grid-cols-[minmax(0,1fr)_auto]">
-                  <div className="min-w-0">
-                    <p className="truncate text-[14.5px] font-medium">{c.caller_name}</p>
-                    <p className="mt-1 truncate text-[12.5px] lux-muted">{c.caller_phone} · {since(c.start_time)}</p>
-                  </div>
-                  <span className="lux-badge lux-badge-warn">{c.intent === 'handoff' ? 'Callback' : 'Tool error'}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          <SectionTitle title="Needs you" action={<button type="button" onClick={() => go('calls')} className="text-[14px] text-[var(--volt)]">All calls</button>} />
+          <CallsPanel compact attentionOnly limit={4} />
         </section>
         <section>
-          <div className="mb-5 flex items-end justify-between">
-            <h2 className="lux-section-title">Upcoming bookings</h2>
-            <button type="button" onClick={() => go('reservations')} className="lux-navlink text-[13px] inline-flex items-center gap-1.5">All reservations <ArrowRight size={14} /></button>
-          </div>
-          <ReservationsPanel upcomingOnly limit={5} allowCancel={false} />
+          <SectionTitle title="Upcoming bookings" action={<button type="button" onClick={() => go('bookings')} className="text-[14px] text-[var(--volt)]">All bookings</button>} />
+          <ReservationsPanel compact limit={5} />
         </section>
       </div>
     </>
   );
 }
 
-// ---------------- Restaurant profile ----------------
-function Profile() {
-  const { ownerConfig, updateOwnerConfig, saveAndDeploy, isDeploying, deploySuccess, lastDeployedMessage, hasUnsavedChanges } = useOwnerConfig();
-  const field = 'w-full rounded-xl border border-[var(--lux-line-strong)] bg-[#0e0e10] px-4 py-3 text-[14.5px] text-[var(--lux-ivory)] outline-none transition-colors focus:border-[var(--lux-champagne)]';
-
+// ---------------- Host (profile + voice) ----------------
+function HostView() {
+  const { ownerConfig, updateOwnerConfig, lastDeployedMessage } = useOwnerConfig();
+  const agent = ownerConfig.agent_name || 'Talkie';
   return (
     <>
       <PageHead
-        eyebrow="Concierge"
-        title="Restaurant profile"
-        description="The name, location and greeting the AI host uses on every call. Publish to make changes live."
-        actions={
-          <button type="button" onClick={saveAndDeploy} disabled={isDeploying || !hasUnsavedChanges} className="lux-btn lux-btn-primary lux-btn-sm">
-            {isDeploying ? <Loader2 size={14} className="animate-spin" /> : deploySuccess ? <Check size={14} /> : <Rocket size={14} />}
-            {isDeploying ? 'Publishing' : deploySuccess ? 'Published' : 'Publish changes'}
-          </button>
-        }
+        label="Voice & greeting"
+        title={`How ${agent} sounds`}
+        description="The host's name, your restaurant details and the greeting callers hear first. Publish to make changes live."
+        actions={<PublishButton />}
       />
-      <div className="grid max-w-3xl gap-8">
-        <label className="grid gap-2">
-          <span className="text-[13px] text-[var(--lux-ivory-2)]">Restaurant name</span>
-          <input className={field} value={ownerConfig.restaurant_name} onChange={e => updateOwnerConfig({ restaurant_name: e.target.value })} />
+      <div className="lp-card lp-card-pad mb-6 grid gap-5 md:grid-cols-2">
+        <label className="grid gap-2 md:col-span-2">
+          <span className="text-[14px] font-medium">Host name</span>
+          <input className="lp-input" value={ownerConfig.agent_name ?? 'Talkie'} onChange={e => updateOwnerConfig({ agent_name: e.target.value })} />
+          <span className="lp-muted text-[13px]">What the AI host calls itself on every call.</span>
         </label>
         <label className="grid gap-2">
-          <span className="text-[13px] text-[var(--lux-ivory-2)]">Location (spoken to callers)</span>
-          <input className={field} value={ownerConfig.venue || ''} onChange={e => updateOwnerConfig({ venue: e.target.value })} />
+          <span className="text-[14px] font-medium">Restaurant name</span>
+          <input className="lp-input" value={ownerConfig.restaurant_name} onChange={e => updateOwnerConfig({ restaurant_name: e.target.value })} />
         </label>
         <label className="grid gap-2">
-          <span className="text-[13px] text-[var(--lux-ivory-2)]">Greeting</span>
-          <textarea rows={3} className={field} value={ownerConfig.greeting} onChange={e => updateOwnerConfig({ greeting: e.target.value })} />
-          <span className="text-[12px] lux-muted">The host says this exact sentence when it answers.</span>
+          <span className="text-[14px] font-medium">Location callers hear</span>
+          <input className="lp-input" value={ownerConfig.venue || ''} onChange={e => updateOwnerConfig({ venue: e.target.value })} />
         </label>
-        <label className="flex items-center justify-between gap-6 border-t border-[var(--lux-line)] pt-6">
+        <label className="grid gap-2 md:col-span-2">
+          <span className="text-[14px] font-medium">Greeting</span>
+          <textarea rows={2} className="lp-input" value={ownerConfig.greeting} onChange={e => updateOwnerConfig({ greeting: e.target.value })} />
+          <span className="lp-muted text-[13px]">{agent} says exactly this when it answers.</span>
+        </label>
+        <label className="flex items-center justify-between gap-6 rounded-[14px] border border-[var(--paper-line)] px-4 py-3.5 md:col-span-2">
           <span>
-            <span className="block text-[14px]">Canadian hospitality phrasing</span>
-            <span className="mt-1 block text-[12.5px] lux-muted">Conversational fillers and terms such as washroom and bill.</span>
+            <span className="block text-[14.5px] font-medium">Friendly Canadian phrasing</span>
+            <span className="lp-muted block text-[13px]">Natural fillers and words like washroom and bill.</span>
           </span>
-          <input
-            type="checkbox"
-            className="h-5 w-5 accent-[var(--lux-champagne)]"
-            checked={ownerConfig.canadian_dialect !== false}
-            onChange={e => updateOwnerConfig({ canadian_dialect: e.target.checked })}
-          />
+          <input type="checkbox" className="h-5 w-5 accent-[var(--volt)]" checked={ownerConfig.canadian_dialect !== false} onChange={e => updateOwnerConfig({ canadian_dialect: e.target.checked })} />
         </label>
-        {lastDeployedMessage && <p className="text-[13px] lux-muted">{lastDeployedMessage}</p>}
+        {lastDeployedMessage && <p className="lp-muted text-[13.5px] md:col-span-2">{lastDeployedMessage}</p>}
       </div>
+      <SectionTitle title="Voice" />
+      <div className="lp-legacy lp-card overflow-hidden p-1"><VoicePersonaConfig /></div>
     </>
   );
 }
 
 // ---------------- Integrations ----------------
 const PROVIDERS = [
-  {
-    name: 'Leed Pizza reservation book',
-    status: 'connected',
-    note: 'Local database. The AI concierge checks availability, books, changes and cancels here.',
-  },
-  {
-    name: 'OpenTable',
-    status: 'partner',
-    note: 'Partner API. Requires approval as an OpenTable integration partner and a production agreement.',
-  },
-  {
-    name: 'TouchBistro',
-    status: 'partner',
-    note: 'Partner-only API. Requires TouchBistro partner program approval and issued API keys.',
-  },
-  {
-    name: 'Lightspeed Restaurant',
-    status: 'partner',
-    note: 'Reservations for Platforms API (K-Series). Requires an approved Lightspeed Developer Portal account.',
-  },
-  {
-    name: 'POS KING',
-    status: 'unknown',
-    note: 'No public API documentation found. Needs vendor contact before any integration work.',
-  },
+  { name: 'Leed Pizza booking book', state: 'Connected', note: 'Talkie checks availability, books, changes and cancels here.' },
+  { name: 'OpenTable', state: 'Needs partner access', note: 'Requires approval as an OpenTable integration partner and a production agreement.' },
+  { name: 'TouchBistro', state: 'Needs partner access', note: 'Partner-only API. Requires TouchBistro partner program approval.' },
+  { name: 'Lightspeed Restaurant', state: 'Needs partner access', note: 'Reservations for Platforms API, for approved Lightspeed developer accounts.' },
+  { name: 'POS KING', state: 'Not available', note: 'No public API documentation found. Needs a vendor contact.' },
 ];
 
-function Integrations() {
+function IntegrationsView() {
   return (
     <>
-      <PageHead
-        eyebrow="Settings"
-        title="Integrations"
-        description="Where the concierge reads and writes bookings. Only the local reservation book is connected; nothing is synchronised to external platforms."
-      />
-      <div className="border-t border-[var(--lux-line)]">
+      <PageHead label="Integrations" title="Where bookings live" description="Only the local booking book is connected. Nothing is synced to outside platforms yet." />
+      <div className="lp-card overflow-hidden">
         {PROVIDERS.map(p => (
-          <div key={p.name} className="lux-row grid-cols-[minmax(0,1fr)_auto] py-6">
+          <div key={p.name} className="lp-row grid-cols-[minmax(0,1fr)_auto] py-5">
             <div className="min-w-0">
-              <p className="lux-serif text-[24px] leading-none">{p.name}</p>
-              <p className="mt-2 max-w-xl text-[13.5px] leading-relaxed lux-muted">{p.note}</p>
+              <p className="font-[family-name:var(--f-display)] text-[18px] font-semibold tracking-[-0.02em]">{p.name}</p>
+              <p className="lp-muted text-[14px]">{p.note}</p>
             </div>
-            {p.status === 'connected' ? (
-              <span className="lux-badge lux-badge-ok">Connected</span>
-            ) : p.status === 'partner' ? (
-              <span className="lux-badge lux-badge-quiet">Needs partner access</span>
-            ) : (
-              <span className="lux-badge lux-badge-quiet">Not available</span>
-            )}
+            <span className={`lp-badge ${p.state === 'Connected' ? 'lp-badge-ok' : ''}`}>{p.state}</span>
           </div>
         ))}
       </div>
@@ -238,83 +178,67 @@ function Integrations() {
 
 // ---------------- Shell ----------------
 export default function OwnerControlPanel({ onSwitchToOperations }: OwnerControlPanelProps) {
-  const [active, setActive] = useState<OwnerNavTab>('overview');
-  const { ownerConfig, hasUnsavedChanges, isDeploying, deploySuccess, saveAndDeploy, menuItems } = useOwnerConfig();
+  const [active, setActive] = useState<OwnerNavTab>('home');
+  const { ownerConfig, hasUnsavedChanges, menuItems } = useOwnerConfig();
+  const agent = ownerConfig.agent_name || 'Talkie';
   const calls = useCalls();
   const attention = useMemo(() => calls.items.some(needsAttention), [calls.items]);
 
-  const sections: WorkspaceSection[] = [
-    { id: 'overview', label: 'Overview', icon: LayoutDashboard, group: 'Owner' },
-    { id: 'voice', label: 'Agent voice', icon: AudioLines, group: 'Concierge' },
-    { id: 'prompt', label: 'Instructions', icon: ScrollText, group: 'Concierge' },
-    { id: 'profile', label: 'Restaurant profile', icon: Store, group: 'Concierge' },
+  const sections: Section[] = [
+    { id: 'home', label: 'Home', icon: Home, group: 'Overview' },
+    { id: 'host', label: 'Voice & greeting', icon: AudioLines, group: agent },
+    { id: 'prompt', label: 'Instructions', icon: ScrollText, group: agent },
     { id: 'menu', label: 'Menu', icon: UtensilsCrossed, group: 'Restaurant', count: menuItems.length },
     { id: 'floor', label: 'Floor plan', icon: Armchair, group: 'Restaurant' },
-    { id: 'reservations', label: 'Reservations', icon: CalendarDays, group: 'Restaurant' },
-    { id: 'calls', label: 'Call history', icon: PhoneCall, group: 'Restaurant', attention },
+    { id: 'bookings', label: 'Bookings', icon: CalendarDays, group: 'Restaurant' },
+    { id: 'calls', label: 'Calls', icon: PhoneCall, group: 'Restaurant', dot: attention },
     { id: 'integrations', label: 'Integrations', icon: PlugZap, group: 'Settings' },
-    { id: 'deploy', label: 'Publish', icon: Rocket, group: 'Settings', attention: hasUnsavedChanges },
+    { id: 'publish', label: 'Publish', icon: Rocket, group: 'Settings', dot: hasUnsavedChanges },
   ];
 
-  const legacyTitles: Partial<Record<OwnerNavTab, { eyebrow: string; title: string; description: string }>> = {
-    voice: { eyebrow: 'Concierge', title: 'Agent voice', description: 'Choose the Gemini Live voice and personality guests hear.' },
-    prompt: { eyebrow: 'Concierge', title: 'Instructions', description: 'House rules and directives layered on top of the concierge’s fixed safety rules.' },
-    menu: { eyebrow: 'Restaurant', title: 'Menu', description: 'Dishes, prices and sold-out status. The concierge only offers what is available here.' },
-    floor: { eyebrow: 'Restaurant', title: 'Floor plan', description: 'Tables and capacities used for every availability check.' },
-    deploy: { eyebrow: 'Settings', title: 'Publish', description: 'Review the compiled instructions and push your changes live to the voice concierge.' },
+  const legacy: Partial<Record<OwnerNavTab, { label: string; title: string; description: string; body: React.ReactNode }>> = {
+    prompt: { label: agent, title: 'Instructions', description: `House rules ${agent} follows on every call.`, body: <MasterPromptControl /> },
+    menu: { label: 'Restaurant', title: 'Menu', description: `Dishes, prices and what’s sold out. ${agent} only offers what’s available here.`, body: <MenuBuilder /> },
+    floor: { label: 'Restaurant', title: 'Floor plan', description: `Tables and seats ${agent} uses for every availability check.`, body: <FloorPlanBuilder /> },
+    publish: { label: 'Settings', title: 'Publish', description: 'Review your changes and make them live for callers.', body: <DeployPanel onSwitchToOperations={onSwitchToOperations} /> },
   };
-  const legacy = legacyTitles[active];
+  const page = legacy[active];
 
   return (
     <Workspace
-      product="Owner Portal"
+      product="Owner portal"
       venueName={ownerConfig.restaurant_name}
       sections={sections}
       active={active}
       onSelect={id => setActive(id as OwnerNavTab)}
       sidebarFooter={
-        <div className="mx-1 rounded-2xl border border-[var(--lux-line)] p-4">
-          <p className="flex items-center gap-2 text-[12.5px]">
-            <CircleDot size={13} className={hasUnsavedChanges ? 'text-[var(--lux-warn)]' : 'text-[var(--lux-ok)]'} />
-            {hasUnsavedChanges ? 'Unpublished changes' : 'Concierge is up to date'}
-          </p>
-          <button
-            type="button"
-            onClick={saveAndDeploy}
-            disabled={!hasUnsavedChanges || isDeploying}
-            className="lux-btn lux-btn-primary lux-btn-sm mt-3 w-full"
-          >
-            {isDeploying ? <Loader2 size={14} className="animate-spin" /> : deploySuccess ? <Check size={14} /> : <Rocket size={14} />}
-            {isDeploying ? 'Publishing' : deploySuccess ? 'Published' : 'Publish'}
-          </button>
-        </div>
+        hasUnsavedChanges ? (
+          <div className="lp-card mx-1 p-4">
+            <p className="text-[13.5px] font-medium">You have unpublished changes</p>
+            <div className="mt-3"><PublishButton /></div>
+          </div>
+        ) : null
       }
     >
-      {active === 'overview' && <Overview go={setActive} />}
-      {active === 'profile' && <Profile />}
-      {active === 'integrations' && <Integrations />}
-      {active === 'reservations' && (
+      {active === 'home' && <HomeView go={setActive} />}
+      {active === 'host' && <HostView />}
+      {active === 'integrations' && <IntegrationsView />}
+      {active === 'bookings' && (
         <>
-          <PageHead eyebrow="Restaurant" title="Reservations" description="Bookings saved by the AI concierge. Cancelling frees the table for new callers." />
+          <PageHead label="Restaurant" title="Bookings" description={`Every table ${agent} has booked. Cancelling frees it for new callers right away.`} />
           <ReservationsPanel />
         </>
       )}
       {active === 'calls' && (
         <>
-          <PageHead eyebrow="Restaurant" title="Call history" description="Every call the concierge handled, with transcript and the actions it took." />
+          <PageHead label="Restaurant" title="Calls" description={`Every call ${agent} handled, with the transcript and what it did.`} />
           <CallsPanel />
         </>
       )}
-      {legacy && (
+      {page && (
         <>
-          <PageHead eyebrow={legacy.eyebrow} title={legacy.title} description={legacy.description} />
-          <div className="lux-legacy">
-            {active === 'voice' && <VoicePersonaConfig />}
-            {active === 'prompt' && <MasterPromptControl />}
-            {active === 'menu' && <MenuBuilder />}
-            {active === 'floor' && <FloorPlanBuilder />}
-            {active === 'deploy' && <DeployPanel onSwitchToOperations={onSwitchToOperations} />}
-          </div>
+          <PageHead label={page.label} title={page.title} description={page.description} actions={active !== 'publish' ? <PublishButton /> : undefined} />
+          <div className="lp-legacy lp-card overflow-hidden p-1">{page.body}</div>
         </>
       )}
     </Workspace>

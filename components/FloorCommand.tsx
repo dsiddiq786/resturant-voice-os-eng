@@ -131,7 +131,8 @@ export default function FloorCommand() {
   const [lastHandoff, setLastHandoff] = useState<IncomingRequest | null>(null);
   const [currentTime, setCurrentTime] = useState<number>(() => Date.now());
   
-  const [leftDrawerOpen, setLeftDrawerOpen] = useState(true);
+  // Starts collapsed: the floor map is the focus; the legacy voice panel opens from the toggle.
+  const [leftDrawerOpen, setLeftDrawerOpen] = useState(false);
   const [rightDrawerOpen, setRightDrawerOpen] = useState(true);
   const [rightTab, setRightTab] = useState<'turnover' | 'waitlist'>('turnover');
 

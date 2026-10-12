@@ -122,10 +122,7 @@ export default function FloorPlanBuilder() {
             <div className="w-8 h-8 rounded-lg bg-[#0F766E]/10 border border-[#0F766E]/30 flex items-center justify-center text-[#0F766E]">
               <LayoutGrid size={18} />
             </div>
-            <h2 className="text-xl font-bold text-slate-900 tracking-tight">Interactive Floor Plan Builder</h2>
-            <span className="text-[11px] font-sans uppercase bg-[#F3F8F7] text-[#0F766E] px-2.5 py-0.5 rounded border border-[#0F766E]/20 ml-2">
-              Module 2
-            </span>
+            <h2 className="text-xl font-bold text-slate-900 tracking-tight">Floor plan editor</h2>
           </div>
           <p className="text-sm text-slate-600">
             Design the dining room matrix, table capacities, and physical seating coordinates that power live table assignments and Voice AI availability checks.

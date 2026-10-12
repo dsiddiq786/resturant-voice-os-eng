@@ -1,5 +1,5 @@
-import OperationsWorkspace from '@/components/lux/OperationsWorkspace';
+import Operations from '@/components/brand/Operations';
 
 export default function OperationsPage() {
-  return <OperationsWorkspace />;
+  return <Operations />;
 }

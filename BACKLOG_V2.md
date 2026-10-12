@@ -25,8 +25,9 @@ Items deliberately deferred from the premium demo sprint. None of these are impl
 - POS KING: no public API information found during the sprint. Needs vendor documentation or a contact.
 
 ## Voice agent
-- Server-side confirmation gate: refuse `submit_reservation_data`, `modify_reservation` and `cancel_reservation` unless the caller has spoken since the agent's read-back. The prompt alone does not stop the model from asking and acting in one breath.
-- Evaluate Gemini Live NON_BLOCKING function calls (`behavior: NON_BLOCKING` with `scheduling: WHEN_IDLE`) once external booking APIs make tools slow. The local tools take about 1 ms, so blocking calls are fine today.
+- Harden the confirmation gate (today it keys on the agent's turn ending with a question mark) with an explicit two-step confirm token.
+- Live call test with a real human microphone in Chrome and Safari, including noisy rooms and speaker echo.
+- Slow tools are handled with a 1.5 s "still checking" reply plus a follow-up turn. Re-evaluate Gemini Live NON_BLOCKING function calls when external booking APIs are added.
 - Owner-editable opening hours, phone and policies in Restaurant profile (the prompt already reads `opening_hours`, `phone`, `policies` and `delivery_info` if present).
 - Clean up seeded sample calls from the original app.
 

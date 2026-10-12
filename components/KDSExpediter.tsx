@@ -114,10 +114,7 @@ export default function KDSExpediter() {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-base font-bold tracking-wide uppercase text-slate-900">{ownerConfig.restaurant_name.toUpperCase()} KDS &amp; PACING ENGINE</h1>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-sans border border-slate-200">
-                  Phase 3 Expo
-                </span>
+                <h1 className="text-base font-bold tracking-wide uppercase text-slate-900">Kitchen display</h1>
               </div>
               <p className="text-[11px] text-slate-600 font-sans">
                 Single Source of Truth: <span className="text-slate-800 font-semibold">{ownerConfig.venue || 'Main St'}</span>

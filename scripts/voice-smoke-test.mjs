@@ -29,6 +29,16 @@ const SCENARIOS = {
     'Also, what time do you close tonight?',
     'Can I speak to a manager please? I had a problem with my last order.',
   ],
+  identity: [
+    "Hi! Who am I speaking with?",
+    'Great. Do you have anything vegetarian?',
+  ],
+  menu: [
+    'Can you please tell me what you have, what type of food you are offering, and what type of seating arrangements you have?',
+    'What pizzas do you have?',
+    'What would you recommend for someone who likes spicy food?',
+    'How much are the wings?',
+  ],
   info: [
     'How much is the margherita pizza?',
     'Do you have anything vegetarian?',
@@ -45,6 +55,17 @@ if (!lines) {
 }
 
 const CHUNK = 2048;
+// Optional room noise (int16 amplitude, e.g. NOISE_AMP=400) mixed into every chunk, like a real microphone.
+const NOISE = Number(process.env.NOISE_AMP || 0);
+function withNoise(buf) {
+  if (!NOISE) return buf;
+  const out = Buffer.from(buf);
+  for (let i = 0; i < out.length; i += 2) {
+    const v = out.readInt16LE(i) + Math.round((Math.random() * 2 - 1) * NOISE);
+    out.writeInt16LE(Math.max(-32768, Math.min(32767, v)), i);
+  }
+  return out;
+}
 const CHUNK_MS = (CHUNK / 16000) * 1000;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -127,11 +148,12 @@ async function waitForSettle(minTurns, timeoutMs) {
 
 // Like an open microphone: when the caller is not speaking, keep sending silence continuously.
 let speaking = false;
-const ZERO = Buffer.alloc(CHUNK * 2).toString('base64');
 let pump = null;
 function startSilencePump() {
   pump = setInterval(() => {
-    if (!speaking && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ audio: ZERO }));
+    if (!speaking && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ audio: withNoise(Buffer.alloc(CHUNK * 2)).toString('base64') }));
+    }
   }, CHUNK_MS);
 }
 
@@ -140,7 +162,7 @@ async function stream(pcm) {
   for (let off = 0; off < pcm.length; off += CHUNK * 2) {
     const slice = Buffer.alloc(CHUNK * 2);
     pcm.copy(slice, 0, off, Math.min(off + CHUNK * 2, pcm.length));
-    ws.send(JSON.stringify({ audio: slice.toString('base64') }));
+    ws.send(JSON.stringify({ audio: withNoise(slice).toString('base64') }));
     await sleep(CHUNK_MS);
   }
   speaking = false;
@@ -151,7 +173,7 @@ async function silence(ms) {
 }
 
 ws.on('open', async () => {
-  console.log(`Connected (${scenario}) at ${rel()}`);
+  console.log(`Connected (${scenario}${NOISE ? `, noise ${NOISE}` : ''}) at ${rel()}`);
   startSilencePump();
   // Keep a trickle of silence flowing while the greeting plays, like an open microphone.
   const greeted = waitForSettle(1, 20000);

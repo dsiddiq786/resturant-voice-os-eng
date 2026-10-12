@@ -465,10 +465,6 @@ export default function DeliveryDispatch() {
               <h1 className="text-lg font-black font-sans tracking-wider text-slate-800 uppercase">
                 TAKEOUT DISPATCH &amp; PACKING STATION
               </h1>
-              <span className="text-[11px] font-sans px-2 py-0.5 rounded bg-emerald-100/60 border border-emerald-500/40 text-emerald-700 font-bold flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
-                PHASE 4 GATEWAY
-              </span>
             </div>
             <p className="text-xs text-slate-600 font-sans mt-0.5">
               {ownerConfig.restaurant_name} • {ownerConfig.venue || 'Main St'} • Aggregated Delivery Dispatch &amp; Courier Tracking
@@ -705,7 +701,7 @@ export default function DeliveryDispatch() {
                   <Flame size={28} className="text-slate-500 mb-2" />
                   <p className="text-slate-600 font-semibold">No Orders in Kitchen Prep</p>
                   <p className="text-[11px] text-slate-500 mt-1">
-                    Orders accepted or paced from Phase 3 will appear here.
+                    Orders sent to the kitchen will appear here.
                   </p>
                 </div>
               ) : (

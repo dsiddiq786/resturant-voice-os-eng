@@ -1,5 +1,6 @@
 export interface OwnerPersonaConfig {
   restaurant_name: string;
+  agent_name?: string;
   tone: string;
   greeting: string;
   voice_name?: string;
@@ -49,7 +50,7 @@ export function compilePrompt(
   const restaurantName = owner.restaurant_name || "leed pizza";
   const venue = owner.venue || `${restaurantName} Main St`;
   const tone = owner.tone || "Lively & Casual";
-  const greeting = owner.greeting || `Thanks for calling ${restaurantName}, this is your virtual host, how can I help you today?`;
+  const greeting = owner.greeting || `Thanks for calling ${restaurantName}, this is Talkie, how can I help you today?`;
   const canadianDialect = owner.canadian_dialect !== false;
 
   // Build active menu inventory vs 86'd items
@@ -132,7 +133,7 @@ ${owner.master_instructions}
     : '';
 
   return `// --- SECTION 1: OWNER'S CUSTOM PERSONA (DYNAMIC) ---
-You are the virtual host for ${restaurantName} (${venue}).
+You are ${owner.agent_name || 'Talkie'}, the AI host for ${restaurantName} (${venue}).
 Your tone is ${tone}.
 When the call connects, you must greet the caller with exactly this sentence: "${greeting}"
 

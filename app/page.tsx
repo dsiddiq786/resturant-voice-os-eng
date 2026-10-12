@@ -1,5 +1,5 @@
-import ConciergeExperience from '@/components/lux/ConciergeExperience';
+import Concierge from '@/components/brand/Concierge';
 
 export default function Home() {
-  return <ConciergeExperience />;
+  return <Concierge />;
 }

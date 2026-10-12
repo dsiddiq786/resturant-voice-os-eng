@@ -1,102 +1,87 @@
-# Demo progress: Leed Pizza premium demo
+# Demo progress: Leed Pizza × Talkie
 
-Branch: `feature/leed-pizza-premium-demo`. `main` was not touched.
-Run locally: `npm run build && npm start`, then open http://localhost:3000.
-Needs `GEMINI_API_KEY` in `.env` for voice.
+Branch: `feature/leed-pizza-premium-demo`. `main` untouched.
+Run: `npm run build && npm start`, then open http://localhost:3000. `GEMINI_API_KEY` is read from `.env`.
 
-## Round 2: luxury redesign (current)
+## Round 3 (current)
 
-### Design system
-- `app/lux.css`: near-black surfaces, ivory type, champagne and gold accents.
-  - Fonts: Cormorant Garamond (editorial serif) and Manrope via `next/font`, self-hosted at build.
-  - Component classes sit in `@layer components`, so Tailwind utilities still win.
-  - A scoped `.lux-legacy` theme re-skins the existing floor, kitchen, delivery and owner editor screens without touching their logic.
-- `components/lux/SiteNav.tsx`: glass navigation that condenses on scroll, with animated underline links. Links: AI Concierge `/`, Operations `/operations`, Owner Portal `/owner`. Full-screen sheet on mobile.
+### 1. Agent latency and waiting behaviour (critical)
 
-### Homepage and live call
-- `components/lux/ConciergeExperience.tsx`: editorial hero with "Talk to AI Concierge", a capabilities strip, and an in-place call stage.
-- Call stage (WhatsApp-style):
-  - Identity, connection indicator and timer.
-  - Large sphere and a live status line.
-  - Mute, end, and (on mobile) conversation controls.
-  - Agent activity timeline, live transcript, booking confirmation card.
-- `components/lux/NeuralSphere.tsx`: Canvas 2D particle sphere.
-  - 480 particles on desktop, 220 on mobile, in a 3D Fibonacci sphere, with 3 nearest-neighbour links each.
-  - Perspective projection, depth-bucketed lines, gold accent particles, cursor tilt.
-  - States: idle, connecting, listening (driven by mic level), thinking (reorganises into latitude rings), waiting (scan band and faster spin), speaking (pulses with the real output audio level), ended.
-  - Pauses when hidden or off-screen. Static under `prefers-reduced-motion`.
-- `components/concierge/useVoiceCall.ts`: every UI state comes from a real event.
-  - Speaking: agent audio sources are playing, measured by an AnalyserNode on the output.
-  - Waiting: a server `activity: started` event has no matching `completed` yet.
-  - Thinking: the microphone's speech-to-silence transition, until the reply starts.
-  - Listening: the default state.
-  - Transcript and activity come straight from server messages.
+**What was wrong**
+- On the owner's own call, the agent answered a multi-part menu question only after a long pause, then claimed it had been "pulling up the menu information".
+- Nothing was being loaded: the menu is already in the prompt, so the excuse was invented.
+- The transcript timestamps show the delay was the turn ending late (Gemini waiting to decide the caller had finished), not a tool.
 
-### Server (`server.mjs`)
-- Gemini Live input and output transcription is enabled. Fragments are merged per turn, sent to the UI, and stored in the call record, so stored transcripts are now real.
-- Every tool call emits `activity` started and completed events with a safe result summary.
-- A tool that throws still returns an error response to the model, so the agent never goes silent waiting.
-- In-call booking memory: a booking made or found during the call can be changed or cancelled without repeating the code and phone.
-- Call summaries now update on modify and cancel.
-- Prompt changes:
-  - Acknowledge before slow tools.
-  - Grounding rule: never claim availability, a booking, a change or a cancellation without a tool result.
-  - Explicit "NOT PROVIDED" restaurant facts (hours, phone, policies). Owner config values are used if present.
-  - Never promise callback timing.
-  - The agent cannot hang up and must keep answering.
+**Fixes (`server.mjs`)**
+- **Turn detection:** high end-of-speech sensitivity with a 650 ms pause. A noisy room no longer holds the caller's turn open.
+  - Tested and rejected: low start sensitivity, which made the agent miss short questions under noise.
+  - Tested and rejected: a 400 ms pause, which made the agent cut callers off mid-sentence.
+- **Thinking:** set to minimal, with no deliberation before speaking.
+- **Mic chunks:** 64 ms instead of 128 ms in `useVoiceCall`.
+- **Prompt:**
+  - Lead with the answer.
+  - Never claim to be loading or fetching anything unless a tool runs in that turn.
+  - Acknowledge before every booking-system call, in the caller's mood: warm, brisk, empathetic or reassuring. Never repeat a phrase, and never read out the mood label.
+- **Slow booking system:**
+  - If a tool hasn't answered in 1.5 s, the server immediately returns a "still checking" result. The agent can then tell the caller it is still checking.
+  - When the real result arrives, it is handed to the agent as a new turn and spoken straight away. All speech is generated by the model; nothing is scripted or faked.
+  - The UI shows "Still checking with the booking system".
+  - Test knob: `VOICE_TOOL_DELAY_MS`, off by default.
+- **Confirmation gate:** if the agent's current turn ends with a question ("Shall I book that?"), book, change and cancel are held until the caller answers. This fixes asking and booking in the same breath.
+- **Language:** pinned to `en-US`. Short phrases were being transcribed as Korean.
+- **Owner instructions:** stale owner directives no longer override the system rules.
 
-### Operations (`/operations`)
-- `components/lux/OperationsWorkspace.tsx`: sidebar workspace with Overview, Floor & tables, Reservations, Kitchen, Delivery & takeout, and Calls.
-- The overview uses only real data:
-  - Reservations today and covers (`/api/db/reservations`).
-  - Free tables (`/api/db/seating`).
-  - Open kitchen tickets and deliveries (live contexts).
-  - Calls needing attention (callback requests or tool errors).
-- Reservations list with staff cancel (`POST /api/db/reservations`).
-
-### Owner Portal (`/owner`, also `/admin`)
-- `components/owner/OwnerControlPanel.tsx` (rewritten shell) has these sections:
-  - Overview: the greeting guests hear, voice, tone, publish state, and real counts.
-  - Agent voice and Instructions: existing editors, re-themed.
-  - Restaurant profile: new name, location, greeting and dialect editor, with publish.
-  - Menu, Floor plan, Reservations, Call history.
-  - Integrations: honest provider status.
-  - Publish.
-
-## Tests actually run
-
-| Check | Result |
+**Measured with real Gemini** (`scripts/voice-smoke-test.mjs`, streaming synthetic speech plus optional room noise `NOISE_AMP`)
+| Scenario | Result |
 |---|---|
-| `node --test tests/reservations.test.mjs` | 12 pass |
-| `tsc --noEmit`, ESLint on all new and changed files | Pass (after fixing 3 React-hooks lint errors) |
-| `npm run build` | Pass |
-| **Live Gemini, scripted calls** (`scripts/voice-smoke-test.mjs`: macOS `say` speech streamed through `/api/live` in real time) | See below |
-| Booking: check, create, modify, duplicate, cancel | Pass on the final run. Code Z4KCWH created, moved 7 to 8 PM, a second same-day booking correctly refused as duplicate, then cancelled. All saved to SQLite. |
-| Acknowledgment before tools | Final booking run: agent spoke 1.5–2.9 s before all 5 tool calls |
-| Menu and info: price, vegetarian, gluten-free | Correct, answered only from menu data |
-| Wrong number, supplier, closing hours, manager | Pass after fixes. Hours: "I don't have the hours on hand". Callbacks recorded. |
-| **Live Gemini in the browser UI** (in-app browser; synthetic microphone injected for testing only) | Connected, Speaking, Listening, Thinking, activity timeline, transcript, booking card (KAGZP8), mute, end call, ended state. Desktop and mobile. |
-| Call disconnection | Server logged the call record on close (Alex Morgan, 77 s, real transcript) |
-| Navigation: AI Concierge, Operations, Owner Portal | Each opens its own screen. Mobile menu sheet works. |
-| Hydration and console errors on `/`, `/operations`, `/owner`, `/admin`, `/host` | No errors (fixed a #418 mismatch on `/owner`) |
-| Responsive: 375 px, ~800 px and 1440 px | Checked visually: homepage, call stage and sheet, Operations, Owner |
+| Menu questions, including the owner's exact multi-part question | First reply 0.9–1.6 s after the caller stops; no "loading" excuses |
+| Booking: book, move, cancel | Book waits for "yes", then confirms. Move and cancel each confirmed and saved. First reply 1.2–1.65 s. |
+| Booking system slowed to 5 s | Agent acknowledges, says "still checking" at about 1.5 s, then speaks the real result. No dead air. |
+| Wrong number, supplier, closing hours, manager | Correct. Hours: "I don't have the hours on hand". Callbacks recorded. |
+| "Who am I speaking with?" | "This is Talkie, the restaurant's AI host" |
 
-### Bugs found by live testing and fixed
-1. The agent asked for the confirmation code again for a booking made in the same call. Fixed with in-call booking memory.
-2. The agent said "we have availability" before calling the tool. Fixed with a grounding rule and a stronger tool description; verified on rerun.
-3. The agent invented closing hours ("10 PM"). Fixed with an explicit NOT PROVIDED facts block; verified on rerun.
-4. The agent went permanently silent after saying goodbye to a wrong-number caller. Fixed with a "you cannot hang up" rule; verified on rerun.
-5. Call summary still said "Confirmed" after a modify or cancel. Fixed.
+### 2. Redesign (following the owner's Teachlo reference)
+- **Design system** (`app/brand.css`):
+  - Ink `#080B12` with electric blue `#3B63FF` and ion cyan `#7FD8FF`.
+  - White paper surfaces for the back office.
+  - Bricolage Grotesque, Geist and Geist Mono via `next/font`.
+  - Pill buttons with an animated arrow chip, and a floating glass pill navigation that turns light over white sections.
+- **Concierge (`/`)**
+  - Hero "Every call, answered.", a "what it handles" bento sheet, and a footer wordmark.
+  - The call stage has the orb, a status line, and WhatsApp-style mute and end controls. Its live panel shows a real audio waveform, the transcript, tool steps and the booking card.
+- **Orb** (`components/brand/VoiceOrb.tsx`)
+  - Three.js shader of 16,000 particles (7,000 on mobile), with cursor repulsion.
+  - Morphs between sphere, sound rings and a neural graph:
+    - idle and listening: sphere (listening ripples with the real mic level)
+    - thinking: rings
+    - waiting on the booking system: graph
+    - speaking: pulses with the real speaker level
+  - Reduced motion is respected.
+- **Owner portal (`/owner`)**
+  - Home: a Talkie card (greeting, voice, live status), real counts, "Needs you" and upcoming bookings.
+  - Pages: Voice & greeting (host name, restaurant, greeting), Instructions, Menu, Floor plan, Bookings, Calls, Integrations, Publish.
+- **Operations (`/operations`)**: Tonight's service overview, plus Floor, Bookings, Kitchen, Delivery and Calls.
+- **Legacy screens:** floor, kitchen, delivery and the editors are re-themed to the light palette.
+  - Developer jargon removed ("CRUD Module 3", "Phase 4 Gateway" and similar).
+  - Loud brand-colour buttons calmed.
+  - The floor tool's duplicate voice drawer starts collapsed.
 
-## Not tested
-- A real human microphone in a regular browser tab. The in-app browser blocks the microphone, so browser tests used synthetic caller speech. The audio path after `getUserMedia` is the same code.
-- Kitchen, delivery and floor internal actions beyond rendering. Their logic was not changed.
+### 3. Agent name: Talkie
+- `agent_name` config, default "Talkie", editable on Owner portal > Voice & greeting.
+- Prompt, default greetings, saved greeting, owner instructions and every UI label now use Talkie.
 
-## Known limitations
-- **Restaurant identity data:** `owner_config.json` says "Standford Pizza", and the greeting says "this is your errica". The agent and screens use this as configured. Fix it in Owner Portal > Restaurant profile > Publish.
-- The agent sometimes asks "Shall I book that?" and then books in the same breath, without waiting for an answer. The details are always read back first, but confirmation isn't strictly enforced. Server-side enforcement is in the backlog.
-- When the agent goes straight to a tool call without speaking first, the first audio arrives about 2.3–2.5 s after the caller stops. The tools themselves take about 1 ms.
-- Opening hours, phone and policies are not configured, so the agent says it doesn't have them.
-- Seeded sample calls from the original app (for example Marcus Vance) still appear in call history.
-- Test bookings made during QA: Alex Morgan (KAGZP8, tomorrow 7 PM) is still confirmed; the others were cancelled. Cancel it from Operations > Reservations if not wanted.
-- Booking platforms: only the local reservation book is connected. OpenTable, TouchBistro and Lightspeed need partner approval; POS KING has no public API documentation.
+### Tests actually run (round 3)
+- Unit tests: 12 pass. `tsc`, ESLint and `npm run build`: pass.
+- Live Gemini voice scenarios: see the table above.
+- Real Chrome (headless, via the DevTools protocol), live Gemini call through the app UI:
+  - connect, greeting, caller question, "Checking tables · Free at 6:00 PM", booking confirmed (Z8GN96), mute, end
+  - the microphone was a synthetic stream injected for testing only
+- Full-resolution screenshots of homepage, bento sheet, footer, all Owner and Operations sections, and mobile (390 px). No console errors or warnings on any page.
+- Note: headless screenshot capture does not include the WebGL orb layer. Its pixels were verified by reading the frame (about 36,500 lit pixels), and it is visible in the in-app browser and in the call captures.
+
+### Known limitations
+- **Restaurant name:** the configured restaurant name is still "Standford Pizza", while the site brand is "Leed Pizza". Change it in Owner portal > Voice & greeting > Restaurant name, then Publish.
+- **Real microphone:** no live call with a real human microphone was run by me. Synthetic speech went through the real pipeline.
+- **Confirmation gate is a heuristic:** it keys on the agent's turn ending with a question mark.
+- **Floor, kitchen and delivery:** these keep their original layouts inside the new theme.
+- **Hours, phone and policies** are not configured, so Talkie says it doesn't have them.

@@ -23,7 +23,7 @@ export interface TranscriptEntry {
 export interface ActivityEntry {
   id: string;
   tool: string;
-  phase: 'started' | 'completed';
+  phase: 'started' | 'slow' | 'completed';
   status?: string;
   detail?: Record<string, any> | null;
   startedAt: number;
@@ -50,7 +50,9 @@ function floatToPcm16Base64(input: Float32Array) {
 
 const SPEECH_RMS = 0.015;
 const SPEECH_FRAMES_TO_START = 2;
-const SILENCE_FRAMES_TO_END = 3;
+const SILENCE_FRAMES_TO_END = 5;
+// 1024 samples at 16 kHz = 64 ms per chunk: half the input buffering delay of the old 2048-sample frames.
+const MIC_CHUNK = 1024;
 const THINKING_TIMEOUT_MS = 10000;
 
 export function useVoiceCall({ venue, voice }: Options) {
@@ -225,7 +227,7 @@ export function useVoiceCall({ venue, voice }: Options) {
       wsRef.current = ws;
 
       const source = inputCtx.createMediaStreamSource(stream);
-      const processor = inputCtx.createScriptProcessor(2048, 1, 1);
+      const processor = inputCtx.createScriptProcessor(MIC_CHUNK, 1, 1);
       processorRef.current = processor;
       processor.onaudioprocess = (event) => {
         const input = event.inputBuffer.getChannelData(0);
@@ -316,6 +318,9 @@ export function useVoiceCall({ venue, voice }: Options) {
             pendingToolsRef.current.add(a.id);
             awaitingReplySinceRef.current = 0;
             setActivity(prev => [...prev, { id: a.id, tool: a.tool, phase: 'started', startedAt: Date.now() }]);
+          } else if (a.phase === 'slow') {
+            // The booking system is slow; the agent has been told to keep the caller informed.
+            setActivity(prev => prev.map(e => (e.id === a.id ? { ...e, phase: 'slow' } : e)));
           } else {
             pendingToolsRef.current.delete(a.id);
             setActivity(prev => prev.map(e =>
