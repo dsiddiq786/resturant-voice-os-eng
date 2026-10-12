@@ -3,16 +3,16 @@ import './globals.css'; // Global styles
 import Providers from '@/components/Providers';
 
 export const metadata: Metadata = {
-  title: 'leed pizza OS - Floor Command & Autonomous Voice Concierge',
-  description: 'Floor Command & Autonomous Voice Concierge, Kitchen Pacing, and Seating Management for leed pizza.',
+  title: 'Leed Pizza · AI Concierge',
+  description: 'Talk with the Leed Pizza AI concierge to check availability, book, change or cancel a table.',
   openGraph: {
-    title: 'leed pizza OS - Floor Command & Autonomous Voice Concierge',
-    description: 'Floor Command & Autonomous Voice Concierge, Kitchen Pacing, and Seating Management for leed pizza.',
+    title: 'Leed Pizza · AI Concierge',
+    description: 'Talk with the Leed Pizza AI concierge to check availability, book, change or cancel a table.',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'leed pizza OS - Floor Command & Autonomous Voice Concierge',
+    title: 'Leed Pizza · AI Concierge',
     description: 'Floor Command & Autonomous Voice Concierge, Kitchen Pacing, and Seating Management for leed pizza.',
   },
 };
