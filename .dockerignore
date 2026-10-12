@@ -8,3 +8,7 @@ node_modules
 .env.*
 !.env.example
 coverage
+/data
+/dist
+*.zip
+tsconfig.tsbuildinfo

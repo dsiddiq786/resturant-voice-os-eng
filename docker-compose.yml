@@ -11,6 +11,9 @@ services:
       - LETSENCRYPT_HOST=servio.servicesground.com
     env_file:
       - .env
+    volumes:
+      # Bookings, call logs and owner settings stored in SQLite survive redeploys.
+      - app-data:/app/data
     logging:
       driver: json-file
       options:
@@ -56,6 +59,7 @@ services:
         max-file: "3"
 
 volumes:
+  app-data:
   certs:
   vhost:
   html:
