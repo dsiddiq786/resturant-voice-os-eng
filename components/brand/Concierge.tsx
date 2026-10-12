@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Phone, PhoneOff, Mic, MicOff, MessageSquareText, CalendarCheck } from 'lucide-react';
 import SiteNav, { ArrowChip, BrandMark } from '@/components/brand/SiteNav';
+import { PRODUCT_NAME } from '@/components/brand/product';
 import VoiceOrb, { type OrbMode } from '@/components/brand/VoiceOrb';
 import { useOwnerConfig } from '@/lib/ownerConfigContext';
 import { useVoiceCall, type ActivityEntry, type CallPhase, type TranscriptEntry, type ConfirmedBooking } from '@/components/concierge/useVoiceCall';
@@ -160,7 +161,7 @@ function BookingCard({ booking }: { booking: ConfirmedBooking }) {
 export default function Concierge() {
   const { ownerConfig } = useOwnerConfig();
   const restaurant = ownerConfig.restaurant_name || 'Leed Pizza';
-  const agent = ownerConfig.agent_name || 'Talkie';
+  const agent = PRODUCT_NAME;
   const venue = ownerConfig.venue || `${restaurant} Main St`;
   const voice = ownerConfig.voice_name || 'Leda';
   const call = useVoiceCall({ venue, voice });
@@ -297,9 +298,9 @@ export default function Concierge() {
           </div>
 
           {/* ---------------- Footer ---------------- */}
-          <footer className="relative z-[1] mt-16">
+          <footer className="relative z-[1] mt-16 overflow-hidden pb-4">
             <div className="lp-wrap flex flex-wrap items-center justify-between gap-6 border-t border-[var(--ink-line)] py-8 text-[14px] text-[var(--on-ink-muted)]">
-              <span className="lp-brand text-[var(--on-ink)]"><BrandMark />Leed Pizza</span>
+              <span className="lp-brand text-[var(--on-ink)]"><BrandMark />{PRODUCT_NAME}</span>
               <span>{venue}</span>
               <div className="flex gap-2">
                 <Link href="/operations" className="lp-navlink">Operations</Link>
@@ -307,7 +308,7 @@ export default function Concierge() {
               </div>
             </div>
             <div aria-hidden="true" className="select-none bg-[linear-gradient(180deg,rgba(238,241,246,.14),rgba(238,241,246,0)_85%)] bg-clip-text pb-2 text-center font-[family-name:var(--f-display)] text-[clamp(4.5rem,17vw,15rem)] font-bold leading-[0.8] tracking-[-0.07em] text-transparent">
-              Leed Pizza
+              {PRODUCT_NAME}
             </div>
           </footer>
         </main>

@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ArrowRight, Menu, X } from 'lucide-react';
+import { PRODUCT_NAME } from '@/components/brand/product';
 
 const LINKS = [
   { href: '/', label: 'Concierge' },
@@ -63,9 +64,9 @@ export default function SiteNav({ light = false, action }: { light?: boolean; ac
     <>
       <header className={`lp-nav ${onLight ? 'on-light' : ''}`}>
         <div className="lp-nav-in">
-          <Link href="/" className="lp-brand" aria-label="Leed Pizza concierge home">
+          <Link href="/" className="lp-brand" aria-label={`${PRODUCT_NAME} home`}>
             <BrandMark />
-            Leed Pizza
+            {PRODUCT_NAME}
           </Link>
           <nav aria-label="Primary" className="lp-navlinks max-[860px]:hidden">
             {LINKS.map(l => (

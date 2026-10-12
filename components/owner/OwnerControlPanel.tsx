@@ -17,6 +17,7 @@ import CallsPanel, { useCalls, needsAttention } from '@/components/brand/data/Ca
 import { todayISO } from '@/components/brand/data/useApiList';
 import { useMounted } from '@/components/brand/useMounted';
 import { useOwnerConfig } from '@/lib/ownerConfigContext';
+import { PRODUCT_NAME } from '@/components/brand/product';
 
 export type OwnerNavTab = 'home' | 'host' | 'prompt' | 'menu' | 'floor' | 'bookings' | 'calls' | 'integrations' | 'publish';
 
@@ -39,7 +40,7 @@ function PublishButton({ small = true }: { small?: boolean }) {
 // ---------------- Home ----------------
 function HomeView({ go }: { go: (t: OwnerNavTab) => void }) {
   const { ownerConfig, selectedVoice, menuItems, hasUnsavedChanges } = useOwnerConfig();
-  const agent = ownerConfig.agent_name || 'Talkie';
+  const agent = PRODUCT_NAME;
   const mounted = useMounted();
   const calls = useCalls();
   const reservations = useReservations();
@@ -105,20 +106,20 @@ function HomeView({ go }: { go: (t: OwnerNavTab) => void }) {
 // ---------------- Host (profile + voice) ----------------
 function HostView() {
   const { ownerConfig, updateOwnerConfig, lastDeployedMessage } = useOwnerConfig();
-  const agent = ownerConfig.agent_name || 'Talkie';
+  const agent = PRODUCT_NAME;
   return (
     <>
       <PageHead
         label="Voice & greeting"
         title={`How ${agent} sounds`}
-        description="The host's name, your restaurant details and the greeting callers hear first. Publish to make changes live."
+        description="Your restaurant details and the greeting callers hear first. Publish to make changes live."
         actions={<PublishButton />}
       />
       <div className="lp-card lp-card-pad mb-6 grid gap-5 md:grid-cols-2">
         <label className="grid gap-2 md:col-span-2">
           <span className="text-[14px] font-medium">Host name</span>
-          <input className="lp-input" value={ownerConfig.agent_name ?? 'Talkie'} onChange={e => updateOwnerConfig({ agent_name: e.target.value })} />
-          <span className="lp-muted text-[13px]">What the AI host calls itself on every call.</span>
+          <input className="lp-input" placeholder="e.g. Errica" value={ownerConfig.agent_name ?? ''} onChange={e => updateOwnerConfig({ agent_name: e.target.value })} />
+          <span className="lp-muted text-[13px]">The name your AI host uses with callers. Leave blank to rely on the greeting.</span>
         </label>
         <label className="grid gap-2">
           <span className="text-[14px] font-medium">Restaurant name</span>
@@ -180,7 +181,7 @@ function IntegrationsView() {
 export default function OwnerControlPanel({ onSwitchToOperations }: OwnerControlPanelProps) {
   const [active, setActive] = useState<OwnerNavTab>('home');
   const { ownerConfig, hasUnsavedChanges, menuItems } = useOwnerConfig();
-  const agent = ownerConfig.agent_name || 'Talkie';
+  const agent = PRODUCT_NAME;
   const calls = useCalls();
   const attention = useMemo(() => calls.items.some(needsAttention), [calls.items]);
 

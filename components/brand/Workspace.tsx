@@ -4,7 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import type { LucideIcon } from 'lucide-react';
 import SiteNav, { ArrowChip } from '@/components/brand/SiteNav';
-import { useOwnerConfig } from '@/lib/ownerConfigContext';
+import { PRODUCT_NAME } from '@/components/brand/product';
 
 export interface Section {
   id: string;
@@ -29,8 +29,7 @@ interface Props {
 /** Light workspace used by the Owner portal and Operations: paper surfaces, one sidebar, one content column. */
 export default function Workspace({ product, venueName, sections, active, onSelect, framed, sidebarFooter, children }: Props) {
   const groups = Array.from(new Set(sections.map(s => s.group)));
-  const { ownerConfig } = useOwnerConfig();
-  const agent = ownerConfig.agent_name || 'Talkie';
+  const agent = PRODUCT_NAME;
   return (
     <div className="min-h-dvh bg-[radial-gradient(1100px_520px_at_85%_-8%,rgba(127,216,255,.22),transparent_60%),radial-gradient(900px_420px_at_0%_0%,rgba(59,99,255,.08),transparent_60%)] bg-[var(--paper)]">
       <SiteNav

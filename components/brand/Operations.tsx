@@ -13,6 +13,7 @@ import { useMounted } from '@/components/brand/useMounted';
 import { useKDS } from '@/lib/kdsContext';
 import { useDelivery } from '@/lib/deliveryContext';
 import { useOwnerConfig } from '@/lib/ownerConfigContext';
+import { PRODUCT_NAME } from '@/components/brand/product';
 
 type OpsTab = 'overview' | 'floor' | 'bookings' | 'kitchen' | 'delivery' | 'calls';
 
@@ -107,7 +108,7 @@ function Overview({ go }: { go: (t: OpsTab) => void }) {
 export default function Operations() {
   const [active, setActive] = useState<OpsTab>('overview');
   const { ownerConfig, floorTables } = useOwnerConfig();
-  const agent = ownerConfig.agent_name || 'Talkie';
+  const agent = PRODUCT_NAME;
   const { totalActiveOrders, isThrottled } = useKDS();
   const { activeDeliveryCount } = useDelivery();
   const calls = useCalls();

@@ -14,7 +14,7 @@ export async function GET() {
       voice_name: "Leda",
       voice_label: "Leda - Warm Female",
       restaurant_name: "leed pizza",
-      greeting: "Thanks for calling leed pizza, this is Talkie, how can I help you today?",
+      greeting: "Thanks for calling leed pizza, this is your virtual host, how can I help you today?",
       tone: "Lively & Casual",
       canadian_dialect: true,
       venue: "leed pizza Main St",

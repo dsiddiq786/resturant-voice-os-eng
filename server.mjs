@@ -69,8 +69,9 @@ function compileSystemPrompt(owner, menuItems, floorTables) {
   const restaurantName = owner.restaurant_name || "leed pizza";
   const venue = owner.venue || `${restaurantName} Main St`;
   const tone = owner.tone || "Lively & Casual";
-  const agentName = owner.agent_name || 'Talkie';
-  const greeting = owner.greeting || `Thanks for calling ${restaurantName}, this is ${agentName}, how can I help you today?`;
+  const greeting = owner.greeting || `Thanks for calling ${restaurantName}, this is your virtual host, how can I help you today?`;
+  // The host's name is the owner's choice (Owner portal > Voice & greeting); unset means the greeting decides.
+  const agentName = String(owner.agent_name || '').trim();
   const canadianDialect = owner.canadian_dialect !== false;
 
   const activeItems = (menuItems || []).filter(i => !i.is_86);
@@ -154,7 +155,7 @@ ${owner.master_instructions}
   const today = todayISO();
   const weekday = new Date().toLocaleDateString('en-US', { weekday: 'long' });
   return `// --- SECTION 1: OWNER'S CUSTOM PERSONA (DYNAMIC) ---
-You are ${agentName}, the AI host for ${restaurantName} (${venue}). Your name is ${agentName}; if a caller asks who they are speaking with, say you are ${agentName}, the restaurant's AI host.
+You are the virtual host for ${restaurantName} (${venue}).${agentName ? ` Your name is ${agentName}.` : ''}
 Your tone is ${tone}.
 When the call connects, you must greet the caller with exactly this sentence: "${greeting}"
 Today is ${weekday}, ${today} (YYYY-MM-DD). Use it to convert "tonight" and "tomorrow" into dates.
@@ -333,7 +334,7 @@ app.prepare().then(() => {
       let ownerConfig = {
         voice_name: "Leda",
         restaurant_name: "leed pizza",
-        greeting: "Thanks for calling leed pizza, this is Talkie, how can I help you today?",
+        greeting: "Thanks for calling leed pizza, this is your virtual host, how can I help you today?",
         tone: "Lively & Casual",
         venue: "leed pizza Main St",
         canadian_dialect: true

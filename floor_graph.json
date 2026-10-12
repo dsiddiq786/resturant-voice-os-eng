@@ -16,7 +16,7 @@
     "locked_until": null,
     "turnover_time": null,
     "notes": null,
-    "updated_at": "2026-09-20T10:38:33.511Z",
+    "updated_at": "2026-10-12T16:14:45.749Z",
     "adjacentTo": []
   },
   {
@@ -31,12 +31,12 @@
     "w": 16,
     "h": 22,
     "adjacent_to": "[]",
-    "occupant_name": "Sarah Jenkins",
-    "time_elapsed": 1200,
+    "occupant_name": null,
+    "time_elapsed": 9,
     "locked_until": null,
     "turnover_time": null,
     "notes": null,
-    "updated_at": "2026-09-20T10:38:33.511Z",
+    "updated_at": "2026-10-12T16:14:45.749Z",
     "adjacentTo": []
   },
   {
@@ -56,7 +56,7 @@
     "locked_until": null,
     "turnover_time": null,
     "notes": null,
-    "updated_at": "2026-09-20T10:38:33.511Z",
+    "updated_at": "2026-10-12T16:14:45.749Z",
     "adjacentTo": []
   },
   {
@@ -65,18 +65,18 @@
     "capacity": 1,
     "stage": "SEATED",
     "type": "BAR",
-    "table_category": "Bar",
+    "table_category": "Private",
     "x": 76,
     "y": 10,
     "w": 9,
     "h": 10,
     "adjacent_to": "[]",
-    "occupant_name": "Solo Guest",
-    "time_elapsed": 400,
+    "occupant_name": null,
+    "time_elapsed": 9,
     "locked_until": null,
     "turnover_time": null,
     "notes": null,
-    "updated_at": "2026-09-20T10:38:33.511Z",
+    "updated_at": "2026-10-12T16:14:45.749Z",
     "adjacentTo": []
   },
   {
@@ -85,7 +85,7 @@
     "capacity": 1,
     "stage": "AVAILABLE",
     "type": "BAR",
-    "table_category": "Bar",
+    "table_category": "Private",
     "x": 76,
     "y": 23,
     "w": 9,
@@ -96,7 +96,7 @@
     "locked_until": null,
     "turnover_time": null,
     "notes": null,
-    "updated_at": "2026-09-20T10:38:33.511Z",
+    "updated_at": "2026-10-12T16:14:45.749Z",
     "adjacentTo": []
   },
   {
@@ -105,7 +105,7 @@
     "capacity": 1,
     "stage": "AVAILABLE",
     "type": "BAR",
-    "table_category": "Bar",
+    "table_category": "Private",
     "x": 76,
     "y": 36,
     "w": 9,
@@ -116,7 +116,7 @@
     "locked_until": null,
     "turnover_time": null,
     "notes": null,
-    "updated_at": "2026-09-20T10:38:33.511Z",
+    "updated_at": "2026-10-12T16:14:45.749Z",
     "adjacentTo": []
   },
   {
@@ -125,7 +125,7 @@
     "capacity": 1,
     "stage": "AVAILABLE",
     "type": "BAR",
-    "table_category": "Bar",
+    "table_category": "Private",
     "x": 76,
     "y": 49,
     "w": 9,
@@ -136,7 +136,7 @@
     "locked_until": null,
     "turnover_time": null,
     "notes": null,
-    "updated_at": "2026-09-20T10:38:33.511Z",
+    "updated_at": "2026-10-12T16:14:45.749Z",
     "adjacentTo": []
   },
   {
@@ -145,7 +145,7 @@
     "capacity": 1,
     "stage": "AVAILABLE",
     "type": "BAR",
-    "table_category": "Bar",
+    "table_category": "Private",
     "x": 76,
     "y": 62,
     "w": 9,
@@ -156,7 +156,7 @@
     "locked_until": null,
     "turnover_time": null,
     "notes": null,
-    "updated_at": "2026-09-20T10:38:33.511Z",
+    "updated_at": "2026-10-12T16:14:45.749Z",
     "adjacentTo": []
   },
   {
@@ -165,7 +165,7 @@
     "capacity": 1,
     "stage": "AVAILABLE",
     "type": "BAR",
-    "table_category": "Bar",
+    "table_category": "Private",
     "x": 76,
     "y": 75,
     "w": 9,
@@ -176,7 +176,7 @@
     "locked_until": null,
     "turnover_time": null,
     "notes": null,
-    "updated_at": "2026-09-20T10:38:33.511Z",
+    "updated_at": "2026-10-12T16:14:45.749Z",
     "adjacentTo": []
   },
   {
@@ -196,7 +196,7 @@
     "locked_until": null,
     "turnover_time": null,
     "notes": null,
-    "updated_at": "2026-09-20T10:38:33.511Z",
+    "updated_at": "2026-10-12T16:14:45.749Z",
     "adjacentTo": [
       "T2"
     ]
@@ -218,7 +218,7 @@
     "locked_until": null,
     "turnover_time": null,
     "notes": null,
-    "updated_at": "2026-09-20T10:38:33.511Z",
+    "updated_at": "2026-10-12T16:14:45.749Z",
     "adjacentTo": [
       "T1"
     ]
@@ -235,12 +235,12 @@
     "w": 13,
     "h": 16,
     "adjacent_to": "[\"T4\"]",
-    "occupant_name": "Johnson Party",
-    "time_elapsed": 2400,
+    "occupant_name": null,
+    "time_elapsed": 9,
     "locked_until": null,
     "turnover_time": null,
     "notes": null,
-    "updated_at": "2026-09-20T10:38:33.511Z",
+    "updated_at": "2026-10-12T16:14:45.749Z",
     "adjacentTo": [
       "T4"
     ]
@@ -262,7 +262,7 @@
     "locked_until": null,
     "turnover_time": null,
     "notes": null,
-    "updated_at": "2026-09-20T10:38:33.511Z",
+    "updated_at": "2026-10-12T16:14:45.749Z",
     "adjacentTo": [
       "T3"
     ]
@@ -273,18 +273,18 @@
     "capacity": 8,
     "stage": "CHECK_DROPPED",
     "type": "TABLE",
-    "table_category": "Communal",
+    "table_category": "Private",
     "x": 30,
     "y": 64,
     "w": 28,
     "h": 18,
     "adjacent_to": "[]",
-    "occupant_name": "Guest Party",
-    "time_elapsed": 4500,
+    "occupant_name": null,
+    "time_elapsed": 9,
     "locked_until": null,
     "turnover_time": null,
     "notes": null,
-    "updated_at": "2026-09-20T10:38:33.511Z",
+    "updated_at": "2026-10-12T16:14:45.749Z",
     "adjacentTo": []
   }
 ]

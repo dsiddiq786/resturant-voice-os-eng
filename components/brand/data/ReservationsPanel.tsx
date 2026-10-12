@@ -3,7 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { useApiList, todayISO, time12, dateLong } from './useApiList';
-import { useOwnerConfig } from '@/lib/ownerConfigContext';
+import { PRODUCT_NAME } from '@/components/brand/product';
 
 export interface ReservationRow {
   id: string;
@@ -32,7 +32,7 @@ function formatPhone(digits: string) {
 
 export default function ReservationsPanel({ limit, compact = false }: { limit?: number; compact?: boolean }) {
   const { items, loading, error, refresh } = useReservations();
-  const agent = useOwnerConfig().ownerConfig.agent_name || 'Talkie';
+  const agent = PRODUCT_NAME;
   const [filter, setFilter] = useState<'upcoming' | 'all' | 'cancelled'>('upcoming');
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);

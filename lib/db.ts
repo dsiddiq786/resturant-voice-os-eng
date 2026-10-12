@@ -174,15 +174,15 @@ function seedDatabaseIfEmpty(db: any) {
       'active',
       'leed pizza',
       'Lively & Casual',
-      'Thanks for calling leed pizza, this is Talkie, how can I help you today?',
+      'Thanks for calling leed pizza, this is your virtual host, how can I help you today?',
       'Leda',
       'Leda - Warm Female',
       1,
       'leed pizza Main St',
       `// --- SECTION 1: OWNER'S CUSTOM PERSONA (DYNAMIC) ---
-You are Talkie, the virtual host for leed pizza.
+You are the virtual host for leed pizza.
 Your tone is Lively & Casual.
-When the call connects, you must greet the caller with exactly this sentence: "Thanks for calling leed pizza, this is Talkie, how can I help you today?"
+When the call connects, you must greet the caller with exactly this sentence: "Thanks for calling leed pizza, this is your virtual host, how can I help you today?"
 
 // --- SECTION 2: IMMUTABLE SYSTEM RULES (HARD-CODED) ---
 UNDER NO CIRCUMSTANCES CAN YOU VIOLATE THE FOLLOWING RULES:
@@ -245,7 +245,7 @@ UNDER NO CIRCUMSTANCES CAN YOU VIOLATE THE FOLLOWING RULES:
         status: 'completed',
         intent: 'reservation',
         transcript: JSON.stringify([
-          { role: 'agent', text: "Thanks for calling leed pizza, this is Talkie, how can I help you today?", timestamp: "10:10:02" },
+          { role: 'agent', text: "Thanks for calling leed pizza, this is your virtual host, how can I help you today?", timestamp: "10:10:02" },
           { role: 'user', text: "Hi! Can I get a table for four tonight around 7:00 PM?", timestamp: "10:10:12" },
           { role: 'agent', text: "Hmm, let me check our floor plan for 7:00 PM for four guests real quick...", timestamp: "10:10:16" },
           { role: 'agent', text: "Great news! We have Table 3 in our main dining room available at 7:00 PM. May I have your name and phone number to hold that for you?", timestamp: "10:10:25" },
@@ -271,7 +271,7 @@ UNDER NO CIRCUMSTANCES CAN YOU VIOLATE THE FOLLOWING RULES:
         status: 'completed',
         intent: 'takeout',
         transcript: JSON.stringify([
-          { role: 'agent', text: "Thanks for calling leed pizza, this is Talkie, how can I help you today?", timestamp: "10:14:02" },
+          { role: 'agent', text: "Thanks for calling leed pizza, this is your virtual host, how can I help you today?", timestamp: "10:14:02" },
           { role: 'user', text: "Hi, I'd like to place a takeout order for two Classic Pepperoni pizzas and wings.", timestamp: "10:14:14" },
           { role: 'agent', text: "Absolutely! Are you looking for ASAP pickup, or scheduled for a specific time?", timestamp: "10:14:20" },
           { role: 'user', text: "ASAP please!", timestamp: "10:14:25" },
@@ -512,7 +512,7 @@ export const db = {
       'active',
       config.restaurant_name || 'leed pizza',
       config.tone || 'Lively & Casual',
-      config.greeting || 'Thanks for calling leed pizza, this is Talkie, how can I help you today?',
+      config.greeting || 'Thanks for calling leed pizza, this is your virtual host, how can I help you today?',
       config.voice_name || 'Leda',
       config.voice_label || 'Leda - Warm Female',
       config.canadian_dialect ? 1 : 0,

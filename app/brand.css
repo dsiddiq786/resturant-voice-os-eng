@@ -46,6 +46,8 @@
 }
 
 html { background: var(--paper); -webkit-text-size-adjust: 100%; }
+/* The dark concierge page should never show paper behind it (overscroll, short pages). */
+html:has(.lp-dark.min-h-dvh), html:has(.lp-dark.min-h-dvh) body { background: var(--ink); }
 body {
   background: var(--paper);
   color: var(--on-paper);

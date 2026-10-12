@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
     db.saveMasterPrompt({
       restaurant_name: body.restaurant_name || body.restaurantName || 'leed pizza',
       tone: body.tone || 'Lively & Casual',
-      greeting: body.greeting || 'Thanks for calling leed pizza, this is Talkie, how can I help you today?',
+      greeting: body.greeting || 'Thanks for calling leed pizza, this is your virtual host, how can I help you today?',
       voice_name: body.voice_name || body.voiceName || 'Leda',
       voice_label: body.voice_label || body.voiceLabel || 'Leda - Warm Female',
       canadian_dialect: body.canadian_dialect !== false,

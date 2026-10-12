@@ -3,7 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import { ChevronDown, RefreshCw } from 'lucide-react';
 import { useApiList } from './useApiList';
-import { useOwnerConfig } from '@/lib/ownerConfigContext';
+import { PRODUCT_NAME } from '@/components/brand/product';
 
 export interface CallRow {
   id: string;
@@ -42,7 +42,7 @@ const dur = (s: number) => (s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s
 
 export default function CallsPanel({ limit, compact = false, attentionOnly = false }: { limit?: number; compact?: boolean; attentionOnly?: boolean }) {
   const { items, loading, error, refresh } = useCalls();
-  const agent = useOwnerConfig().ownerConfig.agent_name || 'Talkie';
+  const agent = PRODUCT_NAME;
   const [filter, setFilter] = useState<'all' | 'attention' | 'reservation' | 'takeout'>(attentionOnly ? 'attention' : 'all');
   const [open, setOpen] = useState<string | null>(null);
 

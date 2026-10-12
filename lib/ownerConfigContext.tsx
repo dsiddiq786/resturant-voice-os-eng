@@ -128,8 +128,7 @@ interface OwnerConfigContextType {
 
 const DEFAULT_CONFIG: OwnerPersonaConfig & { voice_label: string; last_deployed_at: string; venue: string } = {
   restaurant_name: 'leed pizza',
-  agent_name: 'Talkie',
-  greeting: 'Thanks for calling leed pizza, this is Talkie, how can I help you today?',
+  greeting: 'Thanks for calling leed pizza, this is your virtual host, how can I help you today?',
   tone: 'Lively & Casual',
   voice_name: 'Leda',
   voice_label: 'Leda - Warm Female',
