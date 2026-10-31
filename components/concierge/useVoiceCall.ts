@@ -35,18 +35,47 @@ interface Options {
   voice: string;
 }
 
-// Same wire protocol as the back-office client: 16 kHz PCM16 up, 24 kHz PCM16 down, base64 in JSON.
-function floatToPcm16Base64(input: Float32Array) {
-  const bytes = new Uint8Array(input.length * 2);
-  const view = new DataView(bytes.buffer);
+// Wire protocol: binary 16 kHz PCM16 frames up and 24 kHz PCM16 frames down (?bin=1); events stay JSON.
+function floatToPcm16(input: Float32Array) {
+  const out = new Int16Array(input.length);
   for (let i = 0; i < input.length; i++) {
     const s = Math.max(-1, Math.min(1, input[i]));
-    view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
   }
-  let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
+  return out;
 }
+
+// Microphone capture off the main thread, so page rendering can never delay or drop caller audio.
+const MIC_WORKLET = `
+class MicCapture extends AudioWorkletProcessor {
+  constructor(options) {
+    super();
+    this.size = options.processorOptions.size;
+    this.buf = new Float32Array(this.size);
+    this.n = 0;
+  }
+  process(inputs) {
+    const ch = inputs[0] && inputs[0][0];
+    if (!ch) return true;
+    for (let i = 0; i < ch.length; i++) {
+      this.buf[this.n++] = ch[i];
+      if (this.n === this.size) {
+        const pcm = new Int16Array(this.size);
+        let sum = 0;
+        for (let j = 0; j < this.size; j++) {
+          const s = Math.max(-1, Math.min(1, this.buf[j]));
+          sum += s * s;
+          pcm[j] = s < 0 ? s * 0x8000 : s * 0x7fff;
+        }
+        this.port.postMessage({ pcm: pcm.buffer, rms: Math.sqrt(sum / this.size) }, [pcm.buffer]);
+        this.n = 0;
+      }
+    }
+    return true;
+  }
+}
+registerProcessor('mic-capture', MicCapture);
+`;
 
 const SPEECH_RMS = 0.015;
 const SPEECH_FRAMES_TO_START = 2;
@@ -54,6 +83,12 @@ const SILENCE_FRAMES_TO_END = 5;
 // 1024 samples at 16 kHz = 64 ms per chunk: half the input buffering delay of the old 2048-sample frames.
 const MIC_CHUNK = 1024;
 const THINKING_TIMEOUT_MS = 10000;
+// Upload backpressure: if more than ~1.5 s of audio is still waiting to leave the browser, drop new
+// frames instead of queueing them. Queued audio only arrives late and makes the call lag further behind.
+const UPLINK_MAX_BUFFERED = 48_000;
+// Small playout delay after a gap, so one late network packet doesn't cut a word in half.
+const PLAYBACK_LEAD_S = 0.06;
+const STATS_EVERY_MS = 5000;
 
 export function useVoiceCall({ venue, voice }: Options) {
   const [state, setState] = useState<CallState>('idle');
@@ -76,7 +111,10 @@ export function useVoiceCall({ venue, voice }: Options) {
   const outputCtxRef = useRef<AudioContext | null>(null);
   const outputBusRef = useRef<GainNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const processorRef = useRef<AudioNode | null>(null);
+  // Audio health, reported to the server every few seconds and stored with the call.
+  const statsRef = useRef({ sent: 0, dropped: 0, underruns: 0, maxUplinkBytes: 0, maxLoopLagMs: 0, playbackLagMs: 0, worklet: false, binary: true });
+  const lastAudioEndRef = useRef(0);
   const sourcesRef = useRef<AudioBufferSourceNode[]>([]);
   const nextPlayRef = useRef(0);
   const mutedRef = useRef(false);
@@ -94,9 +132,16 @@ export function useVoiceCall({ venue, voice }: Options) {
   const transcriptIdRef = useRef(0);
   const phaseRef = useRef<CallPhase>('listening');
 
+  const statsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lagTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const stopLoops = () => {
     if (tickRef.current) clearInterval(tickRef.current);
     tickRef.current = null;
+    if (statsTimerRef.current) clearInterval(statsTimerRef.current);
+    statsTimerRef.current = null;
+    if (lagTimerRef.current) clearInterval(lagTimerRef.current);
+    lagTimerRef.current = null;
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
   };
@@ -134,14 +179,10 @@ export function useVoiceCall({ venue, voice }: Options) {
     setState('ended');
   }, [releaseAudio]);
 
-  const playChunk = (base64: string) => {
+  const playPcm = (pcm: Int16Array) => {
     const ctx = outputCtxRef.current;
     const bus = outputBusRef.current;
-    if (!ctx || !bus) return;
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    const pcm = new Int16Array(bytes.buffer);
+    if (!ctx || !bus || pcm.length === 0) return;
     const buffer = ctx.createBuffer(1, pcm.length, 24000);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < pcm.length; i++) data[i] = pcm[i] / 32768;
@@ -149,13 +190,26 @@ export function useVoiceCall({ venue, voice }: Options) {
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     source.connect(bus);
-    if (nextPlayRef.current < ctx.currentTime) nextPlayRef.current = ctx.currentTime;
+    if (nextPlayRef.current < ctx.currentTime) {
+      // Playback ran dry. Mid-sentence (audio ended under a second ago) that is an audible gap.
+      if (lastAudioEndRef.current && ctx.currentTime - lastAudioEndRef.current < 1) statsRef.current.underruns += 1;
+      nextPlayRef.current = ctx.currentTime + PLAYBACK_LEAD_S;
+    }
     source.start(nextPlayRef.current);
     nextPlayRef.current += buffer.duration;
+    lastAudioEndRef.current = nextPlayRef.current;
+    statsRef.current.playbackLagMs = Math.round((nextPlayRef.current - ctx.currentTime) * 1000);
     sourcesRef.current.push(source);
     source.onended = () => {
       sourcesRef.current = sourcesRef.current.filter(s => s !== source);
     };
+  };
+
+  const playBase64 = (base64: string) => {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    playPcm(new Int16Array(bytes.buffer, 0, bytes.byteLength >> 1));
   };
 
   const addTranscript = (role: 'caller' | 'agent', text: string) => {
@@ -191,6 +245,8 @@ export function useVoiceCall({ venue, voice }: Options) {
     mutedRef.current = false;
     endingRef.current = false;
     nextPlayRef.current = 0;
+    lastAudioEndRef.current = 0;
+    statsRef.current = { sent: 0, dropped: 0, underruns: 0, maxUplinkBytes: 0, maxLoopLagMs: 0, playbackLagMs: 0, worklet: false, binary: true };
     openTurnRef.current = null;
     pendingToolsRef.current.clear();
     setState('connecting');
@@ -222,22 +278,18 @@ export function useVoiceCall({ venue, voice }: Options) {
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const ws = new WebSocket(
-        `${protocol}//${window.location.host}/api/live?venue=${encodeURIComponent(venue)}&voice=${encodeURIComponent(voice)}`
+        `${protocol}//${window.location.host}/api/live?bin=1&venue=${encodeURIComponent(venue)}&voice=${encodeURIComponent(voice)}`
       );
+      ws.binaryType = 'arraybuffer';
       wsRef.current = ws;
 
-      const source = inputCtx.createMediaStreamSource(stream);
-      const processor = inputCtx.createScriptProcessor(MIC_CHUNK, 1, 1);
-      processorRef.current = processor;
-      processor.onaudioprocess = (event) => {
-        const input = event.inputBuffer.getChannelData(0);
-        let sum = 0;
-        for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
-        const rms = mutedRef.current ? 0 : Math.sqrt(sum / input.length);
-        inputLevelRef.current = rms;
+      // One captured mic frame: voice-activity tracking for the visuals, then upload.
+      const onMicFrame = (pcm: Int16Array, rms: number) => {
+        const level = mutedRef.current ? 0 : rms;
+        inputLevelRef.current = level;
 
         // Voice activity: speech then a short silence means the caller finished a sentence.
-        if (rms > SPEECH_RMS) {
+        if (level > SPEECH_RMS) {
           silenceFramesRef.current = 0;
           speechFramesRef.current += 1;
           if (speechFramesRef.current >= SPEECH_FRAMES_TO_START) {
@@ -256,12 +308,38 @@ export function useVoiceCall({ venue, voice }: Options) {
           speechFramesRef.current = 0;
         }
 
-        if (ws.readyState === WebSocket.OPEN && !mutedRef.current) {
-          ws.send(JSON.stringify({ audio: floatToPcm16Base64(input) }));
-        }
+        if (ws.readyState !== WebSocket.OPEN || mutedRef.current) return;
+        const st = statsRef.current;
+        if (ws.bufferedAmount > st.maxUplinkBytes) st.maxUplinkBytes = ws.bufferedAmount;
+        if (ws.bufferedAmount > UPLINK_MAX_BUFFERED) { st.dropped += 1; return; }
+        ws.send(pcm.buffer);
+        st.sent += 1;
       };
-      source.connect(processor);
-      processor.connect(inputCtx.destination);
+
+      const source = inputCtx.createMediaStreamSource(stream);
+      let capture: AudioNode;
+      try {
+        const url = URL.createObjectURL(new Blob([MIC_WORKLET], { type: 'text/javascript' }));
+        await inputCtx.audioWorklet.addModule(url);
+        URL.revokeObjectURL(url);
+        const node = new AudioWorkletNode(inputCtx, 'mic-capture', { processorOptions: { size: MIC_CHUNK } });
+        node.port.onmessage = (e) => onMicFrame(new Int16Array(e.data.pcm), e.data.rms);
+        capture = node;
+        statsRef.current.worklet = true;
+      } catch {
+        // Older browsers: capture on the main thread.
+        const processor = inputCtx.createScriptProcessor(MIC_CHUNK, 1, 1);
+        processor.onaudioprocess = (event) => {
+          const input = event.inputBuffer.getChannelData(0);
+          let sum = 0;
+          for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
+          onMicFrame(floatToPcm16(input), Math.sqrt(sum / input.length));
+        };
+        capture = processor;
+      }
+      processorRef.current = capture;
+      source.connect(capture);
+      capture.connect(inputCtx.destination);
 
       const levelBuffer = new Uint8Array(analyser.fftSize);
       const sampleOutput = () => {
@@ -290,15 +368,32 @@ export function useVoiceCall({ venue, voice }: Options) {
             setPhase(next);
           }
         }, 120);
+        // Main-thread stalls are what make browser audio stutter; measure the worst one.
+        let expected = Date.now() + 250;
+        lagTimerRef.current = setInterval(() => {
+          const lag = Date.now() - expected;
+          if (lag > statsRef.current.maxLoopLagMs) statsRef.current.maxLoopLagMs = lag;
+          expected = Date.now() + 250;
+        }, 250);
+        statsTimerRef.current = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ stats: { ...statsRef.current, seconds: Math.round((Date.now() - startedAtRef.current) / 1000) } }));
+          }
+        }, STATS_EVERY_MS);
       };
 
       ws.onmessage = (event) => {
+        if (event.data instanceof ArrayBuffer) {
+          awaitingReplySinceRef.current = 0;
+          playPcm(new Int16Array(event.data, 0, event.data.byteLength >> 1));
+          return;
+        }
         let msg: any;
         try { msg = JSON.parse(event.data); } catch { return; }
 
         if (msg.audio) {
           awaitingReplySinceRef.current = 0;
-          playChunk(msg.audio);
+          playBase64(msg.audio);
         }
         if (msg.transcript?.text) {
           addTranscript(msg.transcript.role === 'agent' ? 'agent' : 'caller', String(msg.transcript.text));
@@ -310,6 +405,7 @@ export function useVoiceCall({ venue, voice }: Options) {
           sourcesRef.current.forEach(s => { try { s.stop(); } catch (e) { /* already ended */ } });
           sourcesRef.current = [];
           if (outputCtxRef.current) nextPlayRef.current = outputCtxRef.current.currentTime;
+          lastAudioEndRef.current = 0;
           if (openTurnRef.current?.role === 'agent') openTurnRef.current = null;
         }
         if (msg.activity?.id) {

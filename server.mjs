@@ -10,6 +10,39 @@ const SLOW_TOOL_MS = 1500;
 // Test-only: delay every tool result to simulate a slow external booking system. Unset in normal use.
 const TOOL_TEST_DELAY_MS = Number(process.env.VOICE_TOOL_DELAY_MS || 0);
 
+// Stall watchdog: if the caller finished speaking and the model shows no sign of having heard it
+// (no transcript, no reply, no tool call) for this long, the voice connection is replaced.
+const STALL_MS = 7000;
+const MAX_GEMINI_RECONNECTS = 5;
+const SPEECH_RMS = 900;        // int16 RMS, about -31 dBFS: clear speech, not room noise
+const MIN_SPEECH_MS = 450;
+const END_SILENCE_MS = 800;
+
+// Tracks caller speech from raw 16 kHz PCM16 and reports when an utterance ends.
+function createSpeechTracker() {
+  let speechMs = 0, silenceMs = 0, inSpeech = false;
+  return {
+    // Returns true when this frame closes an utterance.
+    push(base64) {
+      const buf = Buffer.from(base64, 'base64');
+      const n = buf.length >> 1;
+      if (!n) return false;
+      let sum = 0;
+      for (let i = 0; i < n; i++) { const v = buf.readInt16LE(i * 2); sum += v * v; }
+      const ms = (n / 16000) * 1000;
+      if (Math.sqrt(sum / n) > SPEECH_RMS) {
+        speechMs += ms; silenceMs = 0;
+        if (speechMs >= MIN_SPEECH_MS) inSpeech = true;
+        return false;
+      }
+      silenceMs += ms;
+      if (!inSpeech) { if (silenceMs > END_SILENCE_MS) speechMs = 0; return false; }
+      if (silenceMs >= END_SILENCE_MS) { inSpeech = false; speechMs = 0; return true; }
+      return false;
+    },
+  };
+}
+
 // Minimal, non-sensitive summary of a tool result for the live activity timeline.
 function activityDetail(result) {
   if (!result) return null;
@@ -329,6 +362,9 @@ app.prepare().then(() => {
 
     try {
       const parsedUrl = parse(req.url, true);
+      // Clients that ask for binary audio (?bin=1) get raw PCM frames instead of base64 JSON:
+      // a quarter less data and no JSON or base64 work on the browser's main thread.
+      const binaryAudio = parsedUrl.query.bin === '1';
 
       // Dynamically load owner config and menu matrix from SQLite and disk
       let ownerConfig = {
@@ -460,6 +496,35 @@ app.prepare().then(() => {
       const ai = new GoogleGenAI({ apiKey });
       let session = null;
 
+      // Connection recovery: a call survives Gemini ending or dropping its connection, and a stalled
+      // session (caller spoke, model shows no sign of hearing it) is replaced without dropping the caller.
+      let resumeHandle = null;
+      let closedByUs = false;
+      let reconnecting = null;
+      let reconnects = 0;
+      let generation = 0;
+      let stalls = 0;
+      const speech = createSpeechTracker();
+      let utteranceEndedAt = 0;
+      let modelActiveAt = Date.now();
+      let pendingTools = 0;
+      let recoveringStall = false;
+      const modelAlive = () => { modelActiveAt = Date.now(); };
+
+      // What a fresh voice connection needs to carry on the same call.
+      const recapText = () => {
+        const lines = transcriptLog.slice(-14).map(e => `${e.role === 'agent' ? 'You' : 'Caller'}: ${String(e.text).trim()}`).join('\n');
+        const done = [reservationSummary, orderSummary, handoffSummary].filter(Boolean).join(' ');
+        return `[System recap: this call moved to a new connection. You have already greeted the caller; do not greet again.\n` +
+          `Conversation so far (most recent last):\n${lines || '(nothing yet)'}\n` +
+          (done ? `Already completed by the tools in this call: ${done}\n` : '') +
+          (sessionBooking ? `The caller's booking in this call has code ${sessionBooking.code}.\n` : '') +
+          `Continue the conversation naturally from here.]`;
+      };
+
+      // fresh: ignore the resumption handle (a resumed session may carry the same fault).
+      const connectGemini = async ({ fresh = false } = {}) => {
+      const gen = ++generation;
       session = await ai.live.connect({
         model: "gemini-3.1-flash-live-preview",
         config: {
@@ -489,13 +554,35 @@ app.prepare().then(() => {
             // No deliberation before speaking; answers come from the prompt context or tools.
             thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
           }),
-          outputAudioTranscription: {}
+          outputAudioTranscription: {},
+          // Keep the running context bounded so replies don't slow down as the call goes on. The
+          // trigger sits well above the system prompt (the full menu is ~17k tokens): compressing
+          // too close to it made Gemini stop hearing the caller in testing.
+          contextWindowCompression: {
+            triggerTokens: String(Number(process.env.LIVE_COMPRESS_TRIGGER_TOKENS) || 48000),
+            slidingWindow: { targetTokens: String(Number(process.env.LIVE_COMPRESS_TARGET_TOKENS) || 32000) },
+          },
+          sessionResumption: !fresh && resumeHandle ? { handle: resumeHandle } : {},
         },
         callbacks: {
           onmessage: (message) => {
+            if (gen !== generation) return; // a replaced connection
+            if (message.sessionResumptionUpdate?.resumable && message.sessionResumptionUpdate.newHandle) {
+              resumeHandle = message.sessionResumptionUpdate.newHandle;
+            }
+            if (message.goAway) {
+              // Gemini will end this connection soon; move to a new one before it does.
+              console.log(`[Gemini] goAway, ${message.goAway.timeLeft || '?'} left; reconnecting`);
+              reconnectGemini('go_away');
+            }
+            if (message.serverContent || message.toolCall) modelAlive();
+
             const audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             if (audio) {
-              if (clientWs.readyState === 1) clientWs.send(JSON.stringify({ audio }));
+              if (clientWs.readyState === 1) {
+                if (binaryAudio) clientWs.send(Buffer.from(audio, 'base64'), { binary: true });
+                else clientWs.send(JSON.stringify({ audio }));
+              }
               recordedAudioChunks.push(audio);
             }
 
@@ -533,11 +620,14 @@ app.prepare().then(() => {
                 let responded = false;
                 let pendingSent = false;
                 let slowTimer = null;
+                pendingTools += 1;
                 // Resolves the call exactly once. If the model was already told "still checking",
                 // the real result is handed over as a new turn so the agent speaks it straight away.
                 const respond = (response) => {
                   if (responded) return;
                   responded = true;
+                  pendingTools -= 1;
+                  modelAlive();
                   if (slowTimer) clearTimeout(slowTimer);
                   sendToClient({
                     activity: {
@@ -746,15 +836,81 @@ app.prepare().then(() => {
               }
             }
           },
-          onclose: () => {
+          onclose: (e) => {
+            if (gen !== generation) return; // a replaced connection
+            if (!closedByUs) {
+              // Unexpected close mid-call: reconnect instead of dropping the caller.
+              console.warn(`[Gemini] connection closed unexpectedly (${e?.code || ''} ${e?.reason || ''})`);
+              reconnectGemini('closed');
+              return;
+            }
             if (clientWs.readyState === 1) clientWs.send(JSON.stringify({ status: "disconnected" }));
           },
           onerror: (err) => {
+            if (gen !== generation) return;
             console.error("Gemini connection error", err);
             if (clientWs.readyState === 1) clientWs.send(JSON.stringify({ error: err.message }));
           }
         },
       });
+      };
+
+      // Replace the connection without dropping the caller. Resume with the handle when we have one;
+      // otherwise (or if resuming fails, or for a stalled session) start fresh and replay a recap.
+      const reconnectGemini = (reason, { fresh = false } = {}) => {
+        if (closedByUs || reconnecting) return reconnecting;
+        if (reconnects >= MAX_GEMINI_RECONNECTS) {
+          if (clientWs.readyState === 1) clientWs.send(JSON.stringify({ status: "disconnected" }));
+          return null;
+        }
+        reconnects += 1;
+        const old = session;
+        const t0 = Date.now();
+        const useFresh = fresh || !resumeHandle;
+        reconnecting = connectGemini({ fresh: useFresh })
+          .catch(err => {
+            if (useFresh) throw err;
+            console.warn('[Gemini] resume failed, starting a fresh session', err?.message || err);
+            return connectGemini({ fresh: true }).then(() => 'fresh');
+          })
+          .then(mode => {
+            try { old?.close(); } catch (e) { /* already closed */ }
+            const how = mode === 'fresh' || useFresh ? 'fresh' : 'resumed';
+            // A fresh session knows nothing of the call so far: give it the recap before anything else.
+            if (how === 'fresh') session.sendClientContent({ turns: [{ role: 'user', parts: [{ text: recapText() }] }], turnComplete: false });
+            modelAlive();
+            console.log(`[Call ${callId}] voice connection replaced (${reason}, ${how}, ${Date.now() - t0} ms)`);
+          })
+          .catch(err => {
+            console.error('[Gemini] reconnect failed', err);
+            if (clientWs.readyState === 1) clientWs.send(JSON.stringify({ status: "disconnected" }));
+          })
+          .finally(() => { reconnecting = null; });
+        return reconnecting;
+      };
+
+      await connectGemini();
+
+      // Watchdog: the caller finished speaking, then nothing at all came back from the model.
+      const stallWatchdog = setInterval(() => {
+        if (closedByUs || recoveringStall || pendingTools > 0 || !utteranceEndedAt) return;
+        if (modelActiveAt >= utteranceEndedAt) { utteranceEndedAt = 0; return; }
+        if (Date.now() - utteranceEndedAt < STALL_MS) return;
+        utteranceEndedAt = 0;
+        recoveringStall = true;
+        stalls += 1;
+        console.warn(`[Call ${callId}] the voice model stopped responding; replacing the connection`);
+        Promise.resolve(reconnectGemini('stalled', { fresh: true }))
+          .then(() => {
+            if (closedByUs) return;
+            session.sendClientContent({
+              turns: [{ role: 'user', parts: [{ text: '[System: the line dropped for a moment and you missed what the caller just said. Apologise in a few words and ask them to repeat it. Do not greet again.]' }] }],
+              turnComplete: true
+            });
+          })
+          .catch(() => {})
+          .finally(() => { recoveringStall = false; });
+      }, 1000);
 
       // Send initial context about the venue
       session.sendClientContent({
@@ -767,13 +923,18 @@ app.prepare().then(() => {
         turnComplete: true
       });
 
-      clientWs.on('message', (data) => {
+      clientWs.on('message', (data, isBinary) => {
         try {
-          const parsed = JSON.parse(data.toString());
+          // Binary frames are raw 16 kHz PCM16 from clients that asked for ?bin=1.
+          const parsed = isBinary ? { audio: Buffer.from(data).toString('base64') } : JSON.parse(data.toString());
           if (parsed.audio) {
-            session.sendRealtimeInput({
-              audio: { data: parsed.audio, mimeType: "audio/pcm;rate=16000" },
-            });
+            // While the connection is being replaced, caller audio is dropped: it would arrive stale.
+            if (!reconnecting) {
+              session.sendRealtimeInput({
+                audio: { data: parsed.audio, mimeType: "audio/pcm;rate=16000" },
+              });
+            }
+            if (speech.push(parsed.audio)) utteranceEndedAt = Date.now();
           }
           if (parsed.userSpeech) {
             transcriptLog.push({
@@ -802,6 +963,8 @@ app.prepare().then(() => {
       
       const finalizeCallSession = async () => {
         clearInterval(pingInterval);
+        clearInterval(stallWatchdog);
+        closedByUs = true;
         // Close the Gemini Live session and our DB handle; both used to leak on every call.
         try { session?.close(); } catch (e) { /* already closed */ }
         try { sqliteDb?.close(); } catch (e) { /* already closed */ }
