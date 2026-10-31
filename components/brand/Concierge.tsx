@@ -27,6 +27,7 @@ const WORKING: Record<string, string> = {
   cancel_reservation: 'Cancelling booking',
   request_staff_callback: 'Requesting a callback',
   submit_food_order: 'Sending order to kitchen',
+  end_call: 'Ending the call',
 };
 
 type Tone = 'ok' | 'warn' | 'bad';
@@ -55,6 +56,8 @@ function outcome(e: ActivityEntry): { text: string; tone: Tone } {
       return { text: 'Recorded', tone: 'ok' };
     case 'submit_food_order':
       return { text: 'Sent', tone: 'ok' };
+    case 'end_call':
+      return { text: 'Goodbye', tone: 'ok' };
     default:
       return { text: 'Done', tone: 'ok' };
   }

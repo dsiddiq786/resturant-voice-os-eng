@@ -14,6 +14,9 @@ const TOOL_TEST_DELAY_MS = Number(process.env.VOICE_TOOL_DELAY_MS || 0);
 // (no transcript, no reply, no tool call) for this long, the voice connection is replaced.
 const STALL_MS = 7000;
 const MAX_GEMINI_RECONNECTS = 5;
+// After end_call: hang up even if no goodbye turn arrives, and close the line if the browser doesn't.
+const HANGUP_NO_TURN_MS = 8000;
+const HANGUP_GRACE_MS = 15000;
 const SPEECH_RMS = 900;        // int16 RMS, about -31 dBFS: clear speech, not room noise
 const MIN_SPEECH_MS = 450;
 const END_SILENCE_MS = 800;
@@ -244,7 +247,7 @@ ${soldOutText}
 - Allergens and dietary needs: never guarantee an item is allergen-free. Say the team will confirm, and offer a staff callback for anything serious.
 - Requests for a person, complaints, supplier or business calls: call request_staff_callback with a short reason and any details the caller gives. Say a team member will follow up. You cannot transfer the call, and you must not promise when they will call (never say "immediately" or "in a few minutes").
 - Wrong number or irrelevant call: politely say they have reached ${restaurantName} and ask whether there is anything else you can help with.
-- You cannot hang up; only the caller ends the call. Saying goodbye never ends the conversation: if the caller speaks again, always answer. Never go silent while the caller is talking to you.
+- Ending the call: when the caller says goodbye, or confirms they need nothing else once their request is done, say one short, warm goodbye and then call end_call; the line closes by itself after your goodbye. Never call end_call while a booking or order is still being discussed or the caller has asked something you have not answered. Never go silent while the caller is talking to you.
 - Unclear speech or silence: ask the caller to repeat, briefly. After two unclear attempts, offer a staff callback.
 - Interruptions: stop speaking, listen, and answer the new point.
 - Unsupported requests (large private events, catering quotes, refunds): say this line cannot handle that, and offer a staff callback.
@@ -511,6 +514,21 @@ app.prepare().then(() => {
       let recoveringStall = false;
       const modelAlive = () => { modelActiveAt = Date.now(); };
 
+      // Hang-up: after end_call, the call closes once the agent's goodbye turn is complete. The browser
+      // waits for the goodbye audio to finish playing; the server closes the line anyway after a grace period.
+      let hangupPending = false;
+      let hangupSent = false;
+      let hangupFallback = null;
+      let hangupClose = null;
+      const hangUp = () => {
+        if (hangupSent) return;
+        hangupSent = true;
+        clearTimeout(hangupFallback);
+        console.log(`[Call ${callId}] agent ended the call`);
+        if (clientWs.readyState === 1) clientWs.send(JSON.stringify({ hangup: true }));
+        hangupClose = setTimeout(() => { try { clientWs.close(1000, 'call ended'); } catch (e) { /* already closed */ } }, HANGUP_GRACE_MS);
+      };
+
       // What a fresh voice connection needs to carry on the same call.
       const recapText = () => {
         const lines = transcriptLog.slice(-14).map(e => `${e.role === 'agent' ? 'You' : 'Caller'}: ${String(e.text).trim()}`).join('\n');
@@ -604,6 +622,7 @@ app.prepare().then(() => {
               closeTranscriptTurn();
               agentTurnText = '';
               if (clientWs.readyState === 1) clientWs.send(JSON.stringify({ turnComplete: true }));
+              if (hangupPending) hangUp();
             }
             
             if (message.serverContent?.interrupted && clientWs.readyState === 1) {
@@ -821,6 +840,16 @@ app.prepare().then(() => {
                   logTool(result);
                   sendToClient({ functionCall: { name: call.name, arguments: args } });
                   respond(result);
+                } else if (call.name === "end_call") {
+                  const result = {
+                    status: 'ending',
+                    message: 'The line closes after your goodbye. If you have already said goodbye, say nothing more.'
+                  };
+                  console.log(`[Tool Call: end_call] ${String(args.reason || '').slice(0, 120)}`);
+                  logTool(result);
+                  respond(result);
+                  hangupPending = true;
+                  hangupFallback = setTimeout(hangUp, HANGUP_NO_TURN_MS);
                 } else {
                   respond({ status: 'error', message: `Unknown tool ${call.name}` });
                 }
@@ -964,6 +993,8 @@ app.prepare().then(() => {
       const finalizeCallSession = async () => {
         clearInterval(pingInterval);
         clearInterval(stallWatchdog);
+        clearTimeout(hangupFallback);
+        clearTimeout(hangupClose);
         closedByUs = true;
         // Close the Gemini Live session and our DB handle; both used to leak on every call.
         try { session?.close(); } catch (e) { /* already closed */ }

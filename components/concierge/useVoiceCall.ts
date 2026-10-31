@@ -89,6 +89,8 @@ const UPLINK_MAX_BUFFERED = 48_000;
 // Small playout delay after a gap, so one late network packet doesn't cut a word in half.
 const PLAYBACK_LEAD_S = 0.06;
 const STATS_EVERY_MS = 5000;
+// Longest wait for the agent's goodbye to finish playing before an agent-ended call hangs up.
+const HANGUP_MAX_WAIT_MS = 12000;
 
 export function useVoiceCall({ venue, voice }: Options) {
   const [state, setState] = useState<CallState>('idle');
@@ -449,6 +451,18 @@ export function useVoiceCall({ venue, voice }: Options) {
           }
         }
         if (msg.status === 'disconnected') finish();
+        if (msg.hangup) {
+          // The agent ended the call: let its goodbye finish playing, then hang up.
+          const startedWaiting = Date.now();
+          const waitForGoodbye = setInterval(() => {
+            const ctx = outputCtxRef.current;
+            const playing = ctx ? nextPlayRef.current - ctx.currentTime > 0.05 : false;
+            if (endingRef.current || !playing || Date.now() - startedWaiting > HANGUP_MAX_WAIT_MS) {
+              clearInterval(waitForGoodbye);
+              if (!endingRef.current) finish();
+            }
+          }, 200);
+        }
       };
 
       ws.onerror = () => {
